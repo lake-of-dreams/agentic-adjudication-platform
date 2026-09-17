@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+adjudication/__init__.py
+adjudication.egg-info/PKG-INFO
+adjudication.egg-info/SOURCES.txt
+adjudication.egg-info/dependency_links.txt
+adjudication.egg-info/requires.txt
+adjudication.egg-info/top_level.txt
+tests/test_invariants.py

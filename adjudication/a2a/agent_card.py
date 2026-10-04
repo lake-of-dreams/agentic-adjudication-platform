@@ -18,6 +18,7 @@ extension, the place A2A 1.0 gives agents for anything beyond the core fields.
 from __future__ import annotations
 
 import base64
+import copy
 import json
 from typing import Any
 
@@ -87,7 +88,8 @@ def new_signing_key() -> ec.EllipticCurvePrivateKey:
 def sign_card(card: dict, key: ec.EllipticCurvePrivateKey, kid: str = "key-1",
               jku: str | None = None) -> dict:
     """Adds an ES256 signature. The signatures field is never part of what is signed."""
-    unsigned = {k: v for k, v in card.items() if k != "signatures"}
+    # A deep copy, so a caller editing the signed card cannot change the original.
+    unsigned = copy.deepcopy({k: v for k, v in card.items() if k != "signatures"})
     header = {"alg": "ES256", "typ": "JOSE", "kid": kid}
     if jku:
         header["jku"] = jku

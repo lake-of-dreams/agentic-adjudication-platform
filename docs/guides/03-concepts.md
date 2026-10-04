@@ -69,7 +69,9 @@ is write-once at the infrastructure layer.
 ## LangGraph: checkpointing vs durable execution
 
 * **Checkpointing** — persists graph state so a run can resume. `InMemorySaver`
-  in dev, a Postgres saver in prod.
+  keeps it in the process and loses it on restart. `durable_checkpointer(path)`
+  keeps it in a SQLite file, so a case paused in one process resumes in another
+  (ADR-0009). Several hosts sharing cases would need a Postgres saver.
 * **Durable execution** — exactly-once side effects, durable timers, compensation
   on failure. Temporal, Camunda.
 
@@ -105,12 +107,38 @@ degrades answers.
 
 ## MCP and A2A
 
-* **MCP** — agent to tool. The 2026-07-28 spec made the core stateless and removed
-  sessions, so authorisation context travels with each call instead of being
-  established once at initialise. That is what makes per-call delegated
-  authorisation natural.
-* **A2A** — agent to agent. v1.0 added JWS-signed Agent Cards over JCS
-  canonicalisation, so a receiving agent can verify the card came from the domain
-  claiming to own it. Canonicalisation carries the weight: two encodings of the
-  same object have to produce identical bytes or the signature fails for reasons
-  that look random.
+* **MCP** — agent to tool. The 2026-07-28 specification made the core stateless
+  and removed sessions, so authorisation context travels with each call instead
+  of being established once at initialise. That is what makes per-call delegated
+  authorisation natural. The same version lets a server answer "input required"
+  and have the client retry with the answers attached. This repository uses that
+  to make an irreversible tool wait for a confirmation from the person the agent
+  acts for (ADR-0011).
+* **A2A** — agent to agent. Version 1.0 lists an agent's addresses under
+  `supportedInterfaces` and signs the Agent Card as a JWS over its JCS (RFC 8785)
+  canonical form, so a receiving agent can check the card came from whoever holds
+  the signing key. Canonicalisation carries the weight: two encodings of the same
+  object have to produce identical bytes or the signature fails for reasons that
+  look random.
+
+## ES256 and HMAC
+
+Both produce a signature over some bytes. They differ in who can make one.
+
+* **HMAC** — one shared secret signs and checks. Every party able to check a
+  signature could also create one.
+* **ES256** — an elliptic-curve key pair. The private key signs; the public key
+  only checks. A card signed this way can be checked by anyone and forged by
+  nobody without the private key (ADR-0012).
+
+JWS wants the ES256 signature as 64 raw bytes, the two numbers r and s side by
+side. The `cryptography` library returns a DER-encoded structure instead, so the
+code converts between the two.
+
+## Grounding an absence
+
+A finding is grounded when it rests on evidence a reviewer can check. For a
+measured criterion that is the sentence it quoted. For a criterion met because
+something is absent, such as no mention of flood zone 3, there is no sentence to
+quote. The evidence is the search over the whole text, recorded as
+`absence_checked` (ADR-0010).

@@ -15,7 +15,10 @@ reasoning behind each answer. Written while making the decisions, not after.
 **What does `interrupt()` do?**
 - Suspends the graph, checkpoints state, process can exit.
 - `Command(resume=...)` continues from the same state, days later if need be.
-- Not a blocking wait. State is durable, the process is not.
+- Not a blocking wait. The process can exit while the case waits.
+- The state survives that only when the graph is built with
+  `durable_checkpointer(path)`, which keeps checkpoints in a SQLite file. The
+  default in-memory saver loses a waiting case on restart. ADR-0009.
 
 **Checkpointing vs durable execution?**
 - Checkpointing = persisted graph state, resumable run. That is all.
@@ -53,6 +56,13 @@ reasoning behind each answer. Written while making the decisions, not after.
 - Effective ceiling is `min(agent_ceiling, human_ceiling)`.
 - RT-05 exercises it: agent with IRREVERSIBLE ceiling acting for a human with
   WRITE ceiling, denied.
+
+**What happens when nobody set a scope?**
+- The call is refused. An empty scope means no cases, and a case-scoped tool
+  called without a `case_id` is refused rather than waved through.
+- Until October 2026 both of those were allowed, so forgetting to set a scope
+  granted every case. Access to all cases is now the explicit grant `ALL_CASES`.
+  ADR-0007.
 
 ## `adjudication/runtime/audit.py` — audit
 
@@ -99,8 +109,12 @@ reasoning behind each answer. Written while making the decisions, not after.
 - One run in eight letting a REFUSE through averages to 0.875 and ships.
 
 **How do you know the gate works?**
-- `adjudication/eval/test_gate_can_fail.py`. Four mutations: machine refusal,
-  missed escalation, tampered audit chain, guardrails not executed.
+- `adjudication/eval/test_gate_can_fail.py`. Six mutations: machine refusal,
+  missed escalation, tampered audit chain, guardrails not executed, findings
+  stripped of evidence, and a quote that is not in the application.
+- The last two were added in October 2026 after the grounding score turned out to
+  be true for every finding and the citation score turned out to be constant.
+  ADR-0010.
 - Each must drive its metric to zero. A gate that reports PASS for everything is
   indistinguishable from one that is not running.
 
@@ -124,3 +138,25 @@ reasoning behind each answer. Written while making the decisions, not after.
   floating-point addition is not associative, so identical requests can give
   different logits depending on what else is in the batch.
 - Temperature 0 removes sampling noise, not numerical noise.
+
+## `adjudication/mcp_server/` and `adjudication/a2a/` — protocols
+
+**Why check the person's authority on every MCP call?**
+- The 2026-07-28 MCP specification has no sessions. Each request carries its own
+  context, so there is no earlier handshake to have checked it.
+- The server rebuilds the person's principal from that context and runs the
+  registry's three checks itself. It does not take the agent's word. ADR-0011.
+
+**Why does issuing a permit stop and ask?**
+- It cannot be undone. The server answers "input required" and runs the call
+  only when it comes back with a confirmation from the officer the agent acts for.
+- A confirmation works once. The registry checks run first, so nobody is asked to
+  confirm a call they could never make.
+- In this model the confirmation is a field the client sends, so it can be
+  forged. Binding it to an identity-provider token is the open question.
+
+**Why ES256 rather than HMAC for the agent card?**
+- With HMAC every checker holds the signing secret and can forge a card.
+- ES256 signs with a private key and checks with a public one. The signed bytes
+  are the RFC 8785 canonical form, so field order cannot change the result.
+  ADR-0012.

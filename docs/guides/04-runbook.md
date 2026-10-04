@@ -10,19 +10,20 @@ needs a live backend.
 ## Setup
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install langgraph pytest
+.venv/bin/pip install -e ".[dev]"
 ```
 
-`make install` instead if you want the editable install plus ruff.
+`make install` does the same. The package needs langgraph, langgraph-checkpoint-sqlite,
+cryptography and rfc8785; the `dev` extra adds pytest and ruff.
 
 ## Commands
 
 | Command | What it proves |
 |---|---|
 | `.venv/bin/python run_demo.py` | four end-to-end cases, audit reconstruction |
-| `.venv/bin/python -m pytest tests/ -q` | 36 invariant tests |
+| `.venv/bin/python -m pytest tests/ -q` | 74 tests: invariants, grounding and scope, protocols |
 | `.venv/bin/python adjudication/eval/run_eval.py` | release gate: 6 cases × 8 runs, gated on worst |
-| `.venv/bin/python adjudication/eval/test_gate_can_fail.py` | the gate can actually fail |
+| `.venv/bin/python adjudication/eval/test_gate_can_fail.py` | six mutations, each must be caught |
 | `.venv/bin/python adjudication/redteam/suite.py` | 10 attacks, OWASP-mapped |
 | `.venv/bin/python compare.py` | supervisor vs swarm auditability |
 | `.venv/bin/python verify_llm.py` | per-field extraction reliability on vLLM and Ollama |
@@ -48,6 +49,23 @@ LLM_BACKEND=ollama .venv/bin/python verify_llm.py   # default
 LLM_BACKEND=vllm   .venv/bin/python verify_llm.py
 ```
 
+A vLLM server started with `--api-key`, or one behind a gateway, rejects calls
+without a token. Set `LLM_API_KEY` and the client sends it as a bearer token. It
+is never logged.
+
+## Keeping a waiting case across restarts
+
+Build the graph with a SQLite checkpointer when a referred case must survive the
+process stopping:
+
+```python
+from adjudication.agents.graph import build_graph, durable_checkpointer
+graph = build_graph(corpus, audit, checkpointer=durable_checkpointer("cases.sqlite"))
+```
+
+Resume with the same `thread_id` and `Command(resume={...})` from any process
+that opens the same file.
+
 ## Troubleshooting
 
 **`LLMUnavailable`** — there is no fallback, by design (ADR-0007). Check the
@@ -58,6 +76,15 @@ small GPU this looks like OOM and usually is not. If the log shows a healthy
 "Available KV cache memory" line immediately before the traceback then memory
 loaded fine, so suspect the FlashInfer sampler and set
 `VLLM_USE_FLASHINFER_SAMPLER=0`.
+
+**`LLMUnavailable: extraction keys ... != ...` or `must be a number or null`** —
+the model returned JSON of the wrong shape. The client asks for structured output,
+but a server can ignore that. Check the server supports `response_format` with a
+JSON schema; there is no repair step, by design.
+
+**`TOOL_DENIED: ... no case_id was given` or `not scoped to case`** — the caller's
+scope is empty or does not include the case. Scopes fail closed (ADR-0007); grant
+the case, or `ALL_CASES` for a supervisor.
 
 **`ModuleNotFoundError: platform.redaction`** — the runtime package is
 `adjudication/runtime/`, not `platform/`, because `platform` collides with a

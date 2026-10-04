@@ -33,9 +33,9 @@ Three properties of the domain drive most of the design:
 | `guard_input` | screen applicant text (4 attack classes) | call a model |
 | `retrieve` | BM25 + dense → RRF → rerank | decide relevance by model |
 | `guard_context` | screen retrieved docs for indirect injection | trust retrieval |
-| `assess` | apply deterministic criteria | use the model for arithmetic |
+| `assess` | apply deterministic criteria, quote the sentence each finding used | use the model for arithmetic |
 | `supervisor` | decide routing, record why | do model work |
-| `decide` | independent action-layer check | trust the supervisor |
+| `decide` | independent action-layer check; a grant needs every finding grounded | trust the supervisor |
 | `escalate` | suspend via `interrupt()` | invent a human decision |
 
 ## Trust boundaries
@@ -50,14 +50,14 @@ Three properties of the domain drive most of the design:
 
 | Capability | File |
 |---|---|
-| LangGraph StateGraph, checkpointing, interrupt/resume, RetryPolicy | `adjudication/agents/graph.py` |
+| LangGraph StateGraph, SQLite checkpoints, interrupt/resume, RetryPolicy | `adjudication/agents/graph.py` |
 | Four-layer guardrails | `adjudication/runtime/guardrails.py` |
-| Tool registry: entitlement, effect ceiling, argument scope | `adjudication/runtime/tools_registry.py` |
+| Tool registry: entitlement, effect ceiling, fail-closed argument scope | `adjudication/runtime/tools_registry.py` |
 | Hash-chained audit, tamper detection, reconstruction | `adjudication/runtime/audit.py` |
 | Reversible typed PII redaction | `adjudication/runtime/redaction.py` |
 | BM25 from formula, RRF, cross-encoder rerank | `adjudication/retrieval/hybrid.py` |
-| Trajectory metrics, 8 runs, gate on worst | `adjudication/eval/` |
-| MCP server with delegated authorisation | `adjudication/mcp_server/server.py` |
-| Signed A2A agent card | `adjudication/a2a/agent_card.py` |
+| Trajectory, grounding and citation metrics, 8 runs, gate on worst | `adjudication/eval/` |
+| MCP server (2026-07-28 shapes): per-call authorisation, confirmation for irreversible tools | `adjudication/mcp_server/server.py` |
+| A2A 1.0 agent card signed with ES256 over its RFC 8785 form | `adjudication/a2a/agent_card.py` |
 | OWASP red-team suite | `adjudication/redteam/suite.py` |
 | Supervisor vs swarm measurement | `compare.py` |

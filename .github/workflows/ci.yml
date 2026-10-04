@@ -1,0 +1,18 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest
+      # These three need no network or GPU, so they gate every push.
+      - run: python adjudication/eval/run_eval.py
+      - run: python adjudication/eval/test_gate_can_fail.py
+      - run: python adjudication/redteam/suite.py

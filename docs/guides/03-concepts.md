@@ -53,8 +53,8 @@ see ADR-0004.
 
 A privileged component performs an action on behalf of a less privileged one
 without checking the caller's authority. Agents are natural confused deputies:
-they hold broad access by construction. Three defences here — entitlement, effect
-ceiling (`min(agent, human)`), argument scope.
+they hold broad access by construction. Three defences apply here: entitlement, an
+effect ceiling of `min(agent, human)`, and argument scope.
 
 ## Hash chaining
 
@@ -97,7 +97,7 @@ violation blocks release, which is the only workable policy for an invariant.
 Replacing left-to-right invalidates every span offset after the first
 substitution, because the placeholder length differs from the original. Applying
 in reverse document order keeps the earlier offsets valid. The bug presents as
-"the model is ignoring the mask" — it is not; the mask went onto the wrong bytes.
+"the model is ignoring the mask". It is not; the mask went onto the wrong bytes.
 
 Typed placeholders (`[PERSON_1]`) keep the fact that a person was mentioned, so
 the model can still reason about roles. `[REDACTED]` destroys that and measurably

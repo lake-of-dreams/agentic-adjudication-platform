@@ -17,7 +17,7 @@ No fallback paths.
   skipping the case. A case that crashes is not a case that passed.
 * `check_output` fails a phantom citation instead of stripping it. Stripping
   gives you a fluent answer whose evidence has quietly gone.
-* The tool registry fails closed on scope (added October 2026). A principal with
+* The tool registry fails closed on scope, a rule added after the others. A principal with
   no case scope used to be allowed every case, and a case-scoped tool called with
   no `case_id` skipped the scope check. Forgetting a scope and granting everything
   looked identical. Now an empty scope allows no case, a missing `case_id` is

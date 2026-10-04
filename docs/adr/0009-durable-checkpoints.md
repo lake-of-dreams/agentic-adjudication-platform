@@ -1,6 +1,6 @@
 # ADR-0009: Keep checkpoints in SQLite so a waiting case survives a restart
 
-**Status:** Accepted, October 2026
+**Status:** Accepted
 
 ## Context
 A referred case pauses at `interrupt()` and waits for an officer. The wait can last days. LangGraph
@@ -20,7 +20,7 @@ is given, which keeps the demo and the tests that need no persistence fast.
 * `test_case_resumes_in_a_new_graph_from_sqlite` pauses a case in one graph, deletes that graph,
   builds a second graph over the same file and resumes the case there.
 * A checkpoint is not durable execution. A crash in the middle of an outside call repeats the call
-  on resume. Every side effect before the pause is internal today, so this is acceptable. An
+  on resume. Every side effect before the pause is internal, so this is acceptable. An
   outside call added before the pause would need its own guard against running twice.
 * The SQLite connection is opened with `check_same_thread=False` because LangGraph may use it from
   more than one thread.

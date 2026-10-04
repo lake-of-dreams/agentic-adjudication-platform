@@ -1,4 +1,4 @@
-"""Tests for the October 2026 fixes: fail-closed tool scope, quoted evidence,
+"""Tests for fail-closed tool scope, quoted evidence,
 rule bugs, and checkpoints that survive a restart.
 
 Each test names the ADR that records the decision it protects.

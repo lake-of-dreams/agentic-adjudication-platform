@@ -60,7 +60,7 @@ reasoning behind each answer. Written while making the decisions, not after.
 **What happens when nobody set a scope?**
 - The call is refused. An empty scope means no cases, and a case-scoped tool
   called without a `case_id` is refused rather than waved through.
-- Until October 2026 both of those were allowed, so forgetting to set a scope
+- Both of those used to be allowed, so forgetting to set a scope
   granted every case. Access to all cases is now the explicit grant `ALL_CASES`.
   ADR-0007.
 
@@ -112,7 +112,7 @@ reasoning behind each answer. Written while making the decisions, not after.
 - `adjudication/eval/test_gate_can_fail.py`. Six mutations: machine refusal,
   missed escalation, tampered audit chain, guardrails not executed, findings
   stripped of evidence, and a quote that is not in the application.
-- The last two were added in October 2026 after the grounding score turned out to
+- The last two were added after the grounding score turned out to
   be true for every finding and the citation score turned out to be constant.
   ADR-0010.
 - Each must drive its metric to zero. A gate that reports PASS for everything is

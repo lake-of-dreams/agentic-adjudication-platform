@@ -27,7 +27,7 @@ sits:
 
     _SENT = re.compile(r"(?<!\d)[.;\n]|[.;\n](?!\d)")
 
-**Revised October 2026.** The first version, `(?<!\d)[.;\n](?!\d)`, refused to split when a digit
+**Revised.** The first version, `(?<!\d)[.;\n](?!\d)`, refused to split when a digit
 stood on *either* side. "Site is in flood zone 3. A flood risk assessment is attached." stayed one
 sentence, so the flood rule quoted the wrong sentence and a sentence ending in a number swallowed
 the next. Regression test: `test_sentence_ending_in_a_number_is_split`.

@@ -38,10 +38,10 @@ why a case went where it did.
 
 ## A note on accuracy
 
-The protocol and library details describe what was current on 4 October 2026: the Model Context
-Protocol specification dated 2026-07-28, Agent2Agent (A2A) protocol version 1.0, the OWASP Top 10
-for Agentic Applications (2026), LangGraph 1.2.12 and langgraph-checkpoint-sqlite 3.1.1. All
-figures for test counts and run results come from running the code on that date.
+The protocol and library details describe these versions: Model Context Protocol specification
+2026-07-28, Agent2Agent (A2A) protocol 1.0, the OWASP Top 10 for Agentic Applications (2026),
+LangGraph 1.2.12 and langgraph-checkpoint-sqlite 3.1.1. Every test count and run result comes from
+running the code at the commit this guide belongs to.
 
 Several things are simplified for teaching. The five criteria are invented and belong to no real
 authority. The Model Context Protocol (MCP) server and the A2A agent card follow the shapes those
@@ -204,7 +204,7 @@ C4 and C5 are met because her application never mentions flood zone 3 or a liste
 is no sentence to quote for something that is not there. Instead the finding records that the
 rule searched the whole text and found nothing. That search counts as its grounding.
 
-### 4.3 Why this changed in October 2026
+### 4.3 Why grounding had to be able to fail
 
 Before this change, findings carried no evidence at all, and the evaluation's grounding score was
 written so that it could only ever return a perfect mark. Notice what that meant: the release gate
@@ -254,7 +254,7 @@ action, such as issuing a permit, notifies someone outside or cannot be undone.
 
 ### 5.3 Fail closed: an empty scope now means no cases
 
-Until October 2026, a person with no case scope set could touch every case, and a tool called with
+Earlier versions let a person with no case scope set touch every case, and a tool called with
 no case at all skipped the scope check. Forgetting to set a scope and granting access to everything
 looked the same. Both now fail. Access to every case is an explicit grant called `ALL_CASES` that
 someone has to write down (ADR-0007).
@@ -326,7 +326,7 @@ from the checkpoint and the log grows from 8 entries to 10.
 
 ### 7.2 Why the checkpoints moved to a database file
 
-Until October 2026, checkpoints lived in memory. If the process stopped while Application B
+Checkpoints used to live only in memory. If the process stopped while Application B
 waited, the case was gone. They can now be kept in a SQLite database file, a single-file database
 that needs no server. A test pauses a case in one graph, discards it, builds a new graph on the
 same file and resumes the case there (ADR-0009).

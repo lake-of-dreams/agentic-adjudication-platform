@@ -1,6 +1,6 @@
 # ADR-0010: Every finding quotes its evidence, and the metrics can fail
 
-**Status:** Accepted, October 2026
+**Status:** Accepted
 
 ## Context
 `Finding.grounded` was true when a finding had evidence. The criteria engine never attached any,

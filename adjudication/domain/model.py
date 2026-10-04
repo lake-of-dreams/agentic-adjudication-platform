@@ -52,11 +52,15 @@ class Finding:
     satisfied: bool | None          # None = could not determine
     rationale: str
     evidence: list[Evidence] = field(default_factory=list)
+    # Settled by searching the whole application and finding nothing that
+    # triggers the criterion. There is no sentence to quote for an absence.
+    absence_checked: bool = False
 
     @property
     def grounded(self) -> bool:
-        """No evidence means the finding cannot carry an automated grant."""
-        return bool(self.evidence)
+        """A finding carries an automated grant only with a quoted sentence
+        behind it, or a recorded whole-text search for an absence."""
+        return bool(self.evidence) or self.absence_checked
 
 
 @dataclass

@@ -5,13 +5,21 @@
 
 Supervisor rather than swarm, for auditability (ADR-0002). escalate() suspends
 via interrupt(), so the process can exit and pick up again from the checkpoint.
+
+An escalated case waits days for an officer, so production passes a durable
+checkpointer: durable_checkpointer() stores state in SQLite, and any process
+that opens the same file can resume the case (ADR-0009). In-memory storage is
+the default only for tests and demos that finish in one process.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import sqlite3
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import RetryPolicy, interrupt
 
@@ -26,7 +34,18 @@ from adjudication.runtime.redaction import redact
 from .state import CaseState
 
 
-def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = None):
+def durable_checkpointer(path: str) -> SqliteSaver:
+    """Checkpoints in a SQLite file that outlives the process.
+
+    check_same_thread=False because LangGraph may write from worker threads.
+    """
+    saver = SqliteSaver(sqlite3.connect(path, check_same_thread=False))
+    saver.setup()
+    return saver
+
+
+def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = None,
+                checkpointer: BaseCheckpointSaver | None = None):
     retriever = HybridRetriever(corpus)
     NOW = now or dt.datetime.now(dt.UTC)
 
@@ -72,7 +91,11 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
     def assess(state: CaseState) -> CaseState:
         findings = evaluate(state["narrative_redacted"])
         payload = [{"criterion_code": f.criterion_code, "satisfied": f.satisfied,
-                    "rationale": f.rationale, "grounded": f.grounded} for f in findings]
+                    "rationale": f.rationale, "grounded": f.grounded,
+                    "absence_checked": f.absence_checked,
+                    "evidence": [{"document_id": e.document_id, "locator": e.locator,
+                                  "quote": e.quote} for e in f.evidence]}
+                   for f in findings]
         audit.append(state["case_id"], "system:assess", "criteria_evaluated",
                      {"unmet": [f.criterion_code for f in findings if f.satisfied is False],
                       "undetermined": [f.criterion_code for f in findings if f.satisfied is None]})
@@ -108,7 +131,11 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
                 "trace": [f"supervisor:{decision}"]}
 
     def decide(state: CaseState) -> CaseState:
-        grounded = all(f["satisfied"] is not None for f in state.get("findings", []))
+        # A grant needs every finding determined and grounded: a quoted
+        # sentence, or a recorded whole-text search for an absence.
+        findings = state.get("findings", [])
+        grounded = bool(findings) and all(
+            f["satisfied"] is not None and f["grounded"] for f in findings)
         res = g.check_action(state["decision"], grounded, state.get("human_required", False))
         audit.append(state["case_id"], "system:guard_action", "screened",
                      {"allowed": res.allowed, "reason": res.reason})
@@ -159,4 +186,4 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
     sg.add_conditional_edges("decide", route_after_decide, {"escalate": "escalate", END: END})
     sg.add_edge("escalate", END)
 
-    return sg.compile(checkpointer=InMemorySaver())
+    return sg.compile(checkpointer=checkpointer or InMemorySaver())

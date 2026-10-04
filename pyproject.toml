@@ -3,7 +3,12 @@ name = "adjudication"
 version = "0.1.0"
 description = "Agentic adjudication under regulatory constraint"
 requires-python = ">=3.12"
-dependencies = ["langgraph>=1.0"]
+dependencies = [
+    "langgraph>=1.2",
+    "langgraph-checkpoint-sqlite>=3.1",
+    "cryptography>=46",
+    "rfc8785>=0.1.4",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]

@@ -33,7 +33,12 @@ _PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 # "." and ate the decimal: "setback is 1.4 m" became "setback is 1" + "4 m", so
 # the rule reported "no setback stated" for an application that stated one.
 # First smoke test caught it. ADR-0005.
-_SENT = re.compile(r"(?<!\d)[.;\n](?!\d)")
+#
+# The first fix refused to split on any full stop next to a digit, so "flood
+# zone 3. No assessment" stayed one sentence and a sentence ending in a number
+# swallowed the next one. A decimal point has a digit on both sides; that is
+# the only place not to split.
+_SENT = re.compile(r"(?<!\d)[.;\n]|[.;\n](?!\d)")
 
 
 def _sentences(text: str) -> list[str]:
@@ -44,30 +49,53 @@ def _sentences(text: str) -> list[str]:
 class RuleResult:
     satisfied: bool | None
     rationale: str
+    # The sentence the rule relied on, quoted exactly from the application. A
+    # measured criterion with no quote cannot carry an automated grant.
+    quote: str | None = None
+    # True when the rule settled the criterion by searching the whole text and
+    # finding nothing that triggers it, e.g. no mention of flood zone 3. There
+    # is no sentence to quote for an absence; the search itself is the basis.
+    absence: bool = False
 
 
-def _first_measure(text: str, near: str) -> float | None:
-    """Measurement in the same sentence as the keyword. Not the first number in the text."""
+def _sentence_with(text: str, pattern: re.Pattern) -> str | None:
+    for sent in _sentences(text):
+        if pattern.search(sent):
+            return sent.strip()
+    return None
+
+
+def _first_measure(text: str, near: str) -> tuple[float, str] | None:
+    """Measurement in the same sentence as the keyword. Not the first number in the text.
+
+    Returns the value and the sentence it came from, so the finding can quote it.
+    """
     for sent in _sentences(text):
         if near.lower() in sent.lower():
             m = _M.search(sent)
             if m:
-                return float(m.group(1))
+                return float(m.group(1)), sent.strip()
     return None
 
 
 def check_setback(text: str) -> RuleResult:
-    v = _first_measure(text, "setback") or _first_measure(text, "boundary")
-    if v is None:
+    # Explicit None checks. `a or b` treated a stated setback of 0 m as missing
+    # and fell through to the next keyword.
+    hit = _first_measure(text, "setback")
+    if hit is None:
+        hit = _first_measure(text, "boundary")
+    if hit is None:
         return RuleResult(None, "no boundary setback stated")
-    return RuleResult(v >= 1.0, f"stated setback {v} m against minimum 1.0 m")
+    v, quote = hit
+    return RuleResult(v >= 1.0, f"stated setback {v} m against minimum 1.0 m", quote)
 
 
 def check_height(text: str) -> RuleResult:
-    v = _first_measure(text, "height")
-    if v is None:
+    hit = _first_measure(text, "height")
+    if hit is None:
         return RuleResult(None, "no height stated")
-    return RuleResult(v <= 4.0, f"stated height {v} m against maximum 4.0 m")
+    v, quote = hit
+    return RuleResult(v <= 4.0, f"stated height {v} m against maximum 4.0 m", quote)
 
 
 def check_coverage(text: str) -> RuleResult:
@@ -76,23 +104,40 @@ def check_coverage(text: str) -> RuleResult:
             m = _PCT.search(sent)
             if m:
                 v = float(m.group(1))
-                return RuleResult(v <= 50.0, f"stated coverage {v}% against maximum 50%")
+                return RuleResult(v <= 50.0, f"stated coverage {v}% against maximum 50%",
+                                  sent.strip())
     return RuleResult(None, "no site coverage stated")
 
 
+_FLOOD3 = re.compile(r"flood zone\s*3", re.I)
+_FRA = re.compile(r"flood risk assessment|\bFRA\b", re.I)
+# "grade [I|II]" was a character class: it matched "grade |" and any word
+# starting with I, and only by luck caught "Grade II". Alternation, and the
+# starred grade.
+_LISTED = re.compile(r"listed building|\bgrade\s+(?:I|II\*?)(?![\w*])", re.I)
+_CONSERVATION = re.compile(r"conservation officer", re.I)
+
+
 def check_flood(text: str) -> RuleResult:
-    if re.search(r"flood zone\s*3", text, re.I):
-        has = bool(re.search(r"flood risk assessment|FRA\b", text, re.I))
-        return RuleResult(has, "flood zone 3: FRA " + ("present" if has else "absent"))
-    return RuleResult(True, "not in flood zone 3")
+    trigger = _sentence_with(text, _FLOOD3)
+    if trigger is None:
+        return RuleResult(True, "no mention of flood zone 3 anywhere in the application",
+                          absence=True)
+    fra = _sentence_with(text, _FRA)
+    if fra is None:
+        return RuleResult(False, "flood zone 3: flood risk assessment absent", trigger)
+    return RuleResult(True, "flood zone 3: flood risk assessment present", fra)
 
 
 def check_heritage(text: str) -> RuleResult:
-    if re.search(r"listed building|grade [I|II]", text, re.I):
-        has = bool(re.search(r"conservation officer", text, re.I))
-        return RuleResult(has, "listed: conservation consultation "
-                               + ("recorded" if has else "absent"))
-    return RuleResult(True, "not listed")
+    trigger = _sentence_with(text, _LISTED)
+    if trigger is None:
+        return RuleResult(True, "no mention of a listed building anywhere in the application",
+                          absence=True)
+    consult = _sentence_with(text, _CONSERVATION)
+    if consult is None:
+        return RuleResult(False, "listed: conservation consultation absent", trigger)
+    return RuleResult(True, "listed: conservation consultation recorded", consult)
 
 
 RULES = {
@@ -101,11 +146,19 @@ RULES = {
 }
 
 
-def evaluate(text: str, evidence: dict[str, list[Evidence]] | None = None) -> list[Finding]:
+def evaluate(text: str, evidence: dict[str, list[Evidence]] | None = None,
+             document_id: str = "application") -> list[Finding]:
+    """Apply every rule. Each finding quotes the sentence it relied on.
+
+    `evidence` adds citations from other documents to particular criteria.
+    """
     ev = evidence or {}
     out: list[Finding] = []
     for code, rule in RULES.items():
         r = rule(text)
+        cites = list(ev.get(code, []))
+        if r.quote:
+            cites.insert(0, Evidence(document_id, f"sentence containing: {r.quote[:40]}", r.quote))
         out.append(Finding(criterion_code=code, satisfied=r.satisfied,
-                           rationale=r.rationale, evidence=list(ev.get(code, []))))
+                           rationale=r.rationale, evidence=cites, absence_checked=r.absence))
     return out

@@ -66,6 +66,23 @@ def main() -> int:
     if m4.guard_coverage != 0.0:
         failures.append("M4 not caught")
 
+    # M5: findings decided with no evidence behind them
+    stripped = [{**f, "evidence": [], "grounded": False, "absence_checked": False}
+                for f in res["findings"]]
+    m5 = score_run({**res, "findings": stripped}, audit, expect_escalation=False)
+    print(f"M5 ungrounded findings      -> grounding={m5.grounding:.2f} worst={m5.worst[1]:.2f}")
+    if m5.grounding != 0.0:
+        failures.append("M5 not caught")
+
+    # M6: a quote that is not in the application
+    phantom = [dict(f) for f in res["findings"]]
+    first = next(f for f in phantom if f["evidence"])
+    first["evidence"] = [{**first["evidence"][0], "quote": "Setback 9.9 m"}]
+    m6 = score_run({**res, "findings": phantom}, audit, expect_escalation=False)
+    print(f"M6 phantom quote            -> citation={m6.citation_validity:.2f} worst={m6.worst[1]:.2f}")
+    if m6.citation_validity != 0.0:
+        failures.append("M6 not caught")
+
     print()
     if failures:
         print(f"MUTATION TESTING FAILED: {failures}")

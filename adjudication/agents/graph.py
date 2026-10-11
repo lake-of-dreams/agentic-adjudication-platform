@@ -148,9 +148,17 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
         return {"guard_events": [{"layer": "action", "allowed": True, "reason": "clean"}],
                 "trace": ["decide"]}
 
-    def escalate(state: CaseState) -> CaseState:
+    def refer(state: CaseState) -> CaseState:
+        # Its own node, because LangGraph runs an interrupted node again from
+        # its first line when the case resumes. Written inside escalate, before
+        # interrupt(), this entry was logged once on suspension and again on
+        # resume. A node that has finished is never run again.
         audit.append(state["case_id"], "system:escalate", "suspended_for_officer",
                      {"reason": state.get("escalation_reason")})
+        return {"trace": ["refer"]}
+
+    def escalate(state: CaseState) -> CaseState:
+        # nothing with a side effect before interrupt(): it all runs twice
         officer = interrupt({"case_id": state["case_id"],
                              "reason": state.get("escalation_reason"),
                              "findings": state.get("findings"),
@@ -163,7 +171,7 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
                 "trace": ["escalate:resumed"]}
 
     def route_after_decide(state: CaseState) -> str:
-        return "escalate" if state["decision"] == "REFER_TO_OFFICER" else END
+        return "refer" if state["decision"] == "REFER_TO_OFFICER" else END
 
     sg = StateGraph(CaseState)
     retry = RetryPolicy(max_attempts=3, initial_interval=0.05, backoff_factor=2.0)
@@ -174,6 +182,7 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
     sg.add_node("assess", assess)
     sg.add_node("supervisor", supervisor)
     sg.add_node("decide", decide)
+    sg.add_node("refer", refer)
     sg.add_node("escalate", escalate)
 
     sg.add_edge(START, "intake")
@@ -183,7 +192,8 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
     sg.add_edge("guard_context", "assess")
     sg.add_edge("assess", "supervisor")
     sg.add_edge("supervisor", "decide")
-    sg.add_conditional_edges("decide", route_after_decide, {"escalate": "escalate", END: END})
+    sg.add_conditional_edges("decide", route_after_decide, {"refer": "refer", END: END})
+    sg.add_edge("refer", "escalate")
     sg.add_edge("escalate", END)
 
     return sg.compile(checkpointer=checkpointer or InMemorySaver())

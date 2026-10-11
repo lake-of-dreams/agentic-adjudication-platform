@@ -217,3 +217,14 @@ def test_interrupt_suspends_and_resume_continues_same_case():
     assert out["officer_decision"] == "GRANT"
     actors = [e.actor for e in audit.for_case("resume-1")]
     assert any(a.startswith("officer:") for a in actors)
+
+
+def test_resume_does_not_write_the_suspension_twice():
+    """LangGraph runs an interrupted node again from its first line on resume.
+    An audit write placed before interrupt() ran twice, so the log said the case
+    was suspended twice."""
+    res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id="resume-2")
+    graph.invoke(Command(resume={"officer_id": "off-9", "decision": "GRANT"}), cfg)
+    actions = [e.action for e in audit.for_case("resume-2")]
+    assert actions.count("suspended_for_officer") == 1
+    assert actions.count("decided") == 1

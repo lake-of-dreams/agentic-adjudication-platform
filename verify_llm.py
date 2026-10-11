@@ -43,6 +43,8 @@ def field_ok(got, want) -> bool:
 def main() -> int:
     print(f"Model reliability over {RUNS} runs per backend, at temperature 0.0.\n")
     reachable = []
+    # label -> (fully correct, runs answered)
+    scores: dict[str, tuple[int, int]] = {}
     for label, cfg in BACKENDS:
         per_field = Counter()
         fully_correct = 0
@@ -68,6 +70,7 @@ def main() -> int:
         reachable.append(label)
         n = RUNS - errors
         avg = sum(latencies) // max(1, len(latencies))
+        scores[label] = (fully_correct, n)
         print(f"  {label}  {fully_correct}/{n} fully correct, {avg}ms avg")
         for k in TRUTH:
             print(f"      {k:<14} {per_field[k]}/{n}")
@@ -88,10 +91,20 @@ def main() -> int:
         print(f"\nFAILED: deterministic path disagreed: {decisive}")
         return 1
 
+    # Said from this run's numbers. This used to print "the 0.5B model is not
+    # reliable" unconditionally, including on runs where it was never reached.
     print("\n" + "=" * 72)
-    print("The 0.5B model is not reliable at this task; see the per-field counts.")
-    print("The decision is right anyway, because the model never fed into it.")
-    print("ADR-0006.")
+    unreliable = [f"{label.strip()} ({ok}/{n})" for label, (ok, n) in scores.items() if ok < n]
+    if unreliable:
+        print("Not reliable at this task on this run: " + ", ".join(unreliable) + ".")
+        print("The decision is right anyway, because the model never fed into it.")
+    else:
+        print("Every backend reached extracted every field correctly on this run.")
+        print("The decision does not rely on that: Python reads the original text.")
+    skipped = len(BACKENDS) - len(reachable)
+    if skipped:
+        print(f"{skipped} backend(s) unreachable and not measured.")
+    print("ADR-0006, ADR-0008.")
     return 0
 
 

@@ -148,3 +148,5 @@ def test_case_resumes_in_a_new_graph_from_sqlite(tmp_path):
     assert out["officer_decision"] == "GRANT"
     assert out["case_id"] == "durable-1"
     assert any(e.actor == "officer:off-3" for e in audit.for_case("durable-1"))
+    # the first process logged the suspension. the resumed one must not log it again.
+    assert [e.action for e in audit.for_case("durable-1")].count("suspended_for_officer") == 0

@@ -106,6 +106,24 @@ def test_a_street_abbreviation_still_ends_a_sentence():
     assert findings["C2"].satisfied is True
 
 
+@pytest.mark.parametrize("text, code", [
+    # the height is the first measurement in the sentence that mentions the boundary
+    ("Height 3.2 m, 0.4 m from the boundary. Coverage 38%.", "C1"),
+    # ranges: only the upper end has a unit after it
+    ("Setback between 0.8 and 1.6 m. Height 3.2 m. Coverage 38%.", "C1"),
+    ("Setback 0.8-1.6 m. Height 3.2 m. Coverage 38%.", "C1"),
+    ("Setback 1.4 m. Height 3.0 to 4.6 m. Coverage 38%.", "C2"),
+    ("Coverage 38% of the plot, 70% with the patio. Setback 1.4 m. Height 3.2 m.", "C3"),
+])
+def test_two_figures_in_one_sentence_are_not_guessed_between(text, code):
+    """Each of these was met on a figure the applicant did not give for that
+    criterion. A rule cannot tell which number belongs to its keyword, so it
+    does not choose: the criterion is undetermined and a person reads it."""
+    findings = {f.criterion_code: f for f in evaluate(text)}
+    assert findings[code].satisfied is None
+    assert "more than one figure" in findings[code].rationale
+
+
 def test_undetermined_is_not_treated_as_satisfied():
     findings = {f.criterion_code: f for f in evaluate("No numbers here.")}
     assert findings["C1"].satisfied is None

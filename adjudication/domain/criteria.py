@@ -28,6 +28,22 @@ CRITERIA: dict[str, Criterion] = {
 
 _M = re.compile(r"(\d+(?:\.\d+)?)\s*(?:m|metre|meter)s?\b", re.I)
 _PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+# A sentence with two numbers in it gives a rule two candidates and no way to
+# choose. "Height 3.2 m, 0.4 m from the boundary" handed the setback rule 3.2 m,
+# the first measurement in the sentence that mentions the boundary, and C1
+# passed. "Setback between 0.8 and 1.6 m" read as 1.6 m, because only the upper
+# end has a unit after it. Both were met on a figure nobody gave for that
+# criterion. So a rule whose sentence holds more than one number does not
+# guess: the criterion is undetermined and an officer reads it. Same direction
+# as the sentence splitter (ADR-0005): losing a figure costs time, reading the
+# wrong one can grant.
+_AMBIGUOUS = "more than one figure in the sentence about {what}; an officer must say which applies"
+
+
+def _one_number(sent: str) -> bool:
+    return len(_NUMBER.findall(sent)) == 1
 
 # Sentence split that does not break inside a decimal. This used to split on
 # "." and ate the decimal: "setback is 1.4 m" became "setback is 1" + "4 m", so
@@ -100,16 +116,17 @@ def _sentence_with(text: str, pattern: re.Pattern) -> str | None:
     return None
 
 
-def _first_measure(text: str, near: str) -> tuple[float, str] | None:
+def _first_measure(text: str, near: str) -> tuple[float | None, str] | None:
     """Measurement in the same sentence as the keyword. Not the first number in the text.
 
     Returns the value and the sentence it came from, so the finding can quote it.
+    The value is None when that sentence holds more than one number.
     """
     for sent in _sentences(text):
         if near.lower() in sent.lower():
             m = _M.search(sent)
             if m:
-                return float(m.group(1)), sent.strip()
+                return (float(m.group(1)) if _one_number(sent) else None), sent.strip()
     return None
 
 
@@ -122,6 +139,8 @@ def check_setback(text: str) -> RuleResult:
     if hit is None:
         return RuleResult(None, "no boundary setback stated")
     v, quote = hit
+    if v is None:
+        return RuleResult(None, _AMBIGUOUS.format(what="the setback"), quote)
     return RuleResult(v >= 1.0, f"stated setback {v} m against minimum 1.0 m", quote)
 
 
@@ -130,6 +149,8 @@ def check_height(text: str) -> RuleResult:
     if hit is None:
         return RuleResult(None, "no height stated")
     v, quote = hit
+    if v is None:
+        return RuleResult(None, _AMBIGUOUS.format(what="the height"), quote)
     return RuleResult(v <= 4.0, f"stated height {v} m against maximum 4.0 m", quote)
 
 
@@ -138,6 +159,8 @@ def check_coverage(text: str) -> RuleResult:
         if "coverage" in sent.lower():
             m = _PCT.search(sent)
             if m:
+                if not _one_number(sent):
+                    return RuleResult(None, _AMBIGUOUS.format(what="coverage"), sent.strip())
                 v = float(m.group(1))
                 return RuleResult(v <= 50.0, f"stated coverage {v}% against maximum 50%",
                                   sent.strip())

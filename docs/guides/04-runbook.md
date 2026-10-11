@@ -21,7 +21,7 @@ cryptography and rfc8785; the `dev` extra adds pytest and ruff.
 | Command | What it proves |
 |---|---|
 | `.venv/bin/python run_demo.py` | four end-to-end cases, audit reconstruction |
-| `.venv/bin/python -m pytest tests/ -q` | 101 tests: invariants, grounding and scope, protocols, signed confirmation |
+| `.venv/bin/python -m pytest tests/ -q` | 102 tests: invariants, grounding and scope, protocols, signed confirmation |
 | `.venv/bin/python adjudication/eval/run_eval.py` | release gate: 6 cases × 8 runs, gated on worst |
 | `.venv/bin/python adjudication/eval/test_gate_can_fail.py` | six mutations, each must be caught |
 | `.venv/bin/python adjudication/redteam/suite.py` | 10 attacks, OWASP-mapped |

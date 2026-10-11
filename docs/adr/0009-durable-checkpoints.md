@@ -20,8 +20,14 @@ is given, which keeps the demo and the tests that need no persistence fast.
 * `test_case_resumes_in_a_new_graph_from_sqlite` pauses a case in one graph, deletes that graph,
   builds a second graph over the same file and resumes the case there.
 * A checkpoint is not durable execution. A crash in the middle of an outside call repeats the call
-  on resume. Every side effect before the pause is internal, so this is acceptable. An
-  outside call added before the pause would need its own guard against running twice.
+  on resume.
+* **Corrected.** This record said every side effect before the pause was internal. It was not:
+  `escalate` appended "suspended_for_officer" to the audit log and then called `interrupt`.
+  LangGraph re-runs an interrupted node from its first line on resume, so every referred case
+  logged its suspension twice, with no crash involved. The append moved to its own node, `refer`,
+  which finishes before the pause and is never re-run. `escalate` now has nothing with an outside
+  effect before `interrupt`. Tests: `test_resume_does_not_write_the_suspension_twice`, and the
+  SQLite resume test now asserts the resumed process writes no second suspension.
 * The SQLite connection is opened with `check_same_thread=False` because LangGraph may use it from
   more than one thread.
 

@@ -106,7 +106,7 @@ edits instead of one. Part 2 shows where the first two sit.
 
 ## Part 2. One application, end to end
 
-An application passes through eight steps, called nodes, and every routing decision is made in
+An application passes through up to nine steps, called nodes, and every routing decision is made in
 one of them. This part follows Ms Nair's application through them.
 
 ### 2.1 The graph: what the system is made of
@@ -117,12 +117,12 @@ each step reads and updates a shared record of the case. That record is called t
 ```
 intake ─► guard_input ─► retrieve ─► guard_context ─► assess ─► supervisor ─► decide ─┬─► END
                                                                                       │
-                                                                                      └─► escalate
-                                                                                          (pauses until
-                                                                                          an officer answers)
+                                                                                      └─► refer ─► escalate
+                                                                                                   (pauses until
+                                                                                                   an officer answers)
 ```
 
-*Figure 1. The eight nodes. Look at `supervisor`: it is the only node that chooses where a case
+*Figure 1. The nine nodes. Look at `supervisor`: it is the only node that chooses where a case
 goes, so one audit record explains every outcome. `decide` then checks that choice independently.*
 
 ### 2.2 Ms Nair's application, step by step
@@ -137,8 +137,8 @@ goes, so one audit record explains every outcome. `decide` then checks that choi
 8. The case ends with seven entries in its audit log.
 
 Application B follows the same first five steps. At step 6 the supervisor sees C1 unmet and
-routes it to REFER_TO_OFFICER. The `escalate` node then pauses the case and waits for a person,
-which Part 7 explains.
+routes it to REFER_TO_OFFICER. The `refer` node records the referral, and the `escalate` node then
+pauses the case and waits for a person, which Part 7 explains.
 
 ### 2.3 The audit log that cannot be quietly edited
 
@@ -369,12 +369,29 @@ in the meantime.
 
 ### 7.1 Pausing a case
 
-When the supervisor refers Application B, the `escalate` node calls LangGraph's `interrupt`. The
-graph stops and saves its state under the case's ID. That saved state is called a checkpoint.
-When officer off-12 later answers "GRANT, the applicant moved the studio back", the graph resumes
-from the checkpoint and the log grows from 8 entries to 10.
+When the supervisor refers Application B, the `refer` node writes "suspended for officer" to the
+audit log. The `escalate` node then calls LangGraph's `interrupt`. The graph stops and saves its
+state under the case's ID. That saved state is called a checkpoint. When officer off-12 later
+answers "GRANT, the applicant moved the studio back", the graph resumes from the checkpoint and the
+log grows from 8 entries to 9: the officer's decision.
 
-### 7.2 Why the checkpoints moved to a database file
+### 7.2 A paused step runs twice
+
+When a case resumes, LangGraph does not continue from the line where `interrupt` was called. It
+runs the paused node again from its first line. The second time, `interrupt` returns the officer's
+answer instead of stopping.
+
+That re-run caught out the first version. The `escalate` node wrote "suspended for officer" to the
+audit log and then called `interrupt`. On resume, the write ran again. Every referred case
+recorded its suspension twice, and the log grew from 8 entries to 10, not 9. Nobody reading the
+log could tell whether the case had been suspended once or twice.
+
+The write now lives in its own node, `refer`, which runs before `escalate`. A node that has
+finished is never run again, so the record is written exactly once. The rule this teaches: inside
+a node that pauses, nothing with an effect outside the graph's state may come before `interrupt`.
+`test_resume_does_not_write_the_suspension_twice` holds it.
+
+### 7.3 Why the checkpoints moved to a database file
 
 Checkpoints used to live only in memory. If the process stopped while Application B
 waited, the case was gone. They can now be kept in a SQLite database file, a single-file database
@@ -382,8 +399,8 @@ that needs no server. A test pauses a case in one graph, discards it, builds a n
 same file and resumes the case there (ADR-0009).
 
 A checkpoint is not the same as durable execution. If the graph crashes in the middle of calling
-an outside system, resuming from a checkpoint repeats that call. That is acceptable here because
-every side effect before the pause is internal.
+an outside system, resuming from a checkpoint repeats that call. The audit log is such a system,
+and 7.2 shows the repeat happening without any crash at all.
 
 ## Part 8. Proving it works: tests, a release gate that can fail, and attacks
 
@@ -392,11 +409,11 @@ on every push.
 
 ### 8.1 The tests
 
-There are 101 tests in four files.
+There are 102 tests in four files.
 
 | File | Plain meaning | Tests |
 |---|---|---|
-| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses", and the sentence splitter | 38 |
+| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses", the sentence splitter and resuming once | 39 |
 | `tests/test_grounding_and_scope.py` | Evidence, tool scope, the rule bugs and resuming from SQLite | 18 |
 | `tests/test_protocols.py` | The MCP server, the signed card and the model client | 19 |
 | `tests/test_confirmation.py` | The signed officer confirmation: each test sends a token wrong in exactly one way | 26 |
@@ -434,7 +451,7 @@ Everything except `verify_llm.py` runs on a laptop with no GPU, no network and n
 
 ```bash
 make install    # creates .venv and installs the package with its test tools
-make all        # lint, 101 tests, release gate, gate mutations, red team, topology comparison
+make all        # lint, 102 tests, release gate, gate mutations, red team, topology comparison
 make demo       # four cases end to end, with the audit log reconstructed
 ```
 
@@ -510,7 +527,7 @@ The guides in `docs/guides/` go deeper: architecture, design questions, concepts
 | Canonical form | One agreed way of writing a JSON object, so its bytes are always the same | 6.3 |
 | Checkpoint | Saved state that lets a paused case resume | 7.1 |
 | Confused deputy | A trusted helper doing something for a caller that the caller was not allowed to do | 5.1 |
-| Durable execution | Running steps so that outside side effects happen exactly once, even after a crash | 7.2 |
+| Durable execution | Running steps so that outside side effects happen exactly once, even after a crash | 7.3 |
 | Effect ceiling | The most serious kind of action a caller may take: read, write or irreversible | 5.2 |
 | ES256 | A signing method that uses a private key to sign and a public key to check | 6.2 |
 | Escalate | Hand a case to a human officer and pause until they answer | 2.2 |
@@ -531,10 +548,11 @@ The guides in `docs/guides/` go deeper: architecture, design questions, concepts
 | Node | One step in the graph | 2.1 |
 | Ollama | A program for running language models on a local machine | 3.3 |
 | OWASP Top 10 for Agentic Applications | A published list of the main security risks for AI agents | 8.3 |
+| Re-run on resume | LangGraph running a paused node again from its first line when the case resumes | 7.2 |
 | Redaction | Replacing personal details, such as a name, with placeholders | 2.2 |
 | Release gate | The check that must pass before a version ships | 8.2 |
 | Setback | How far a building stands from the boundary of its plot | 1.1 |
-| SQLite | A database that lives in a single file and needs no server | 7.2 |
+| SQLite | A database that lives in a single file and needs no server | 7.3 |
 | State | The shared record of a case that every node reads and updates | 2.1 |
 | Structured output | A model reply constrained to a stated JSON shape | 3.3 |
 | Supervisor | The node that makes every routing decision | 2.2 |

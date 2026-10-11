@@ -42,6 +42,16 @@ the next. Regression test: `test_sentence_ending_in_a_number_is_split`.
   often only loses a figure, which sends the case to an officer. Regression tests:
   `test_abbreviation_before_a_number_does_not_lose_the_number` and
   `test_a_street_abbreviation_still_ends_a_sentence`.
+* **Revised a third time: one number per sentence.** The joining hazard also exists inside one
+  sentence. "Height 3.2 m, 0.4 m from the boundary" mentions the boundary, so the setback rule read
+  it and took the first measurement, 3.2 m, and C1 passed. "Setback between 0.8 and 1.6 m" read as
+  1.6 m, because only the upper end carries a unit. Both applications came back with every
+  criterion met. A measurement rule now reads only from a sentence with exactly one number in it;
+  otherwise the criterion is undetermined with the reason "more than one figure in the sentence".
+  Coverage follows the same rule for percentages. Tests:
+  `test_two_figures_in_one_sentence_are_not_guessed_between` (five cases) and red-team case RT-11.
+  Cost: a clear sentence that also carries an address number, such as "At No. 14 the setback is
+  1.4 m", now goes to a person.
 * Regression test: `test_decimal_measurements_are_not_split`.
 * Test any regex over regulated text against the numeric formats that actually turn
   up in it. A tokeniser bug in a rules engine presents as missing data, not as a bug.

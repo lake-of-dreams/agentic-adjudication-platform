@@ -113,7 +113,8 @@ degrades answers.
   authorisation natural. The same version lets a server answer "input required"
   and have the client retry with the answers attached. This repository uses that
   to make an irreversible tool wait for a confirmation from the person the agent
-  acts for (ADR-0011).
+  acts for (ADR-0011). The confirmation is a signed token from the identity
+  provider, bound to that person and to the exact call (ADR-0013).
 * **A2A** — agent to agent. Version 1.0 lists an agent's addresses under
   `supportedInterfaces` and signs the Agent Card as a JWS over its JCS (RFC 8785)
   canonical form, so a receiving agent can check the card came from whoever holds

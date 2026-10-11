@@ -58,6 +58,7 @@ Three properties of the domain drive most of the design:
 | BM25 from formula, RRF, cross-encoder rerank | `adjudication/retrieval/hybrid.py` |
 | Trajectory, grounding and citation metrics, 8 runs, gate on worst | `adjudication/eval/` |
 | MCP server (2026-07-28 shapes): per-call authorisation, confirmation for irreversible tools | `adjudication/mcp_server/server.py` |
+| Signed officer confirmation: verification and the store of spent tokens | `adjudication/mcp_server/confirmation.py` |
 | A2A 1.0 agent card signed with ES256 over its RFC 8785 form | `adjudication/a2a/agent_card.py` |
 | OWASP red-team suite | `adjudication/redteam/suite.py` |
 | Supervisor vs swarm measurement | `compare.py` |

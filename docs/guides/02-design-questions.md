@@ -152,8 +152,9 @@ reasoning behind each answer. Written while making the decisions, not after.
   only when it comes back with a confirmation from the officer the agent acts for.
 - A confirmation works once. The registry checks run first, so nobody is asked to
   confirm a call they could never make.
-- In this model the confirmation is a field the client sends, so it can be
-  forged. Binding it to an identity-provider token is the open question.
+- The confirmation is a token signed by the identity provider, bound to the
+  officer, this server and a hash of the exact call, valid for five minutes and
+  spent on first use. The agent carries it and cannot make one. ADR-0013.
 
 **Why ES256 rather than HMAC for the agent card?**
 - With HMAC every checker holds the signing secret and can forge a card.

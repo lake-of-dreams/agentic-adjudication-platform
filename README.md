@@ -40,7 +40,7 @@ why a case went where it did.
 
 The protocol and library details describe these versions: Model Context Protocol specification
 2026-07-28, Agent2Agent (A2A) protocol 1.0, the OWASP Top 10 for Agentic Applications (2026),
-LangGraph 1.2.12 and langgraph-checkpoint-sqlite 3.1.1. Every test count and run result comes from
+LangGraph 1.2.14 and langgraph-checkpoint-sqlite 3.1.1. Every test count and run result comes from
 running the code at the commit this guide belongs to.
 
 Several things are simplified for teaching. The five criteria are invented and belong to no real
@@ -229,6 +229,22 @@ in half, but that fix also stopped it splitting "flood zone 3. A flood risk asse
 attached." into two sentences. The splitter now keeps only a decimal point intact, because that is
 the one full stop with a digit on both sides.
 
+Abbreviations were the last gap. "Height approx. 3.2 m." was cut after "approx", so the height
+rule found the word "Height" in one piece and the number in the next. It reported no height, and
+the applicant would have been asked for a figure they had already given.
+
+The fix is deliberately one-sided, because the two possible mistakes do not cost the same.
+Splitting where it should not loses a number, and a lost number sends the case to an officer.
+Joining two real sentences can attach a number to the wrong rule.
+
+**Example.** Take "The setback is measured from Mill St. Height 3.2 m." Read as one sentence, the
+setback rule finds the word "setback" and the first measurement, 3.2 m. Since 3.2 m is above the
+1.0 m minimum, C1 passes on a figure that is really the height.
+
+So the splitter joins only after abbreviations that cannot end a sentence. "approx.", "ca." and
+"No." are joined when a digit follows, and "Mr", "Mrs" and "Ms" when a name follows. "St.", "Rd."
+and "Dr." can end a sentence, so they still split, and the example above stays two sentences.
+
 ## Part 5. Tools and permissions: stopping a confused deputy
 
 An agent acts with its own permissions on behalf of a person with fewer. Every tool call is
@@ -271,14 +287,48 @@ works, step by step.
 
 1. The agent calls `issue_permit` for case C1 on behalf of officer off-7.
 2. The server runs the three checks from 5.2 and refuses at once if any fails.
-3. The server answers "input required" with a confirmation request addressed to off-7.
-4. The officer confirms, and the agent repeats the same call with that confirmation attached.
-5. The server checks the confirmation names off-7 and has not been used before.
-6. The server issues the permit and records who authorised it.
+3. The server answers "input required". The request names off-7, this server, and a fingerprint
+   of the exact call: the tool name and its arguments.
+4. Officer off-7 approves the action at the council's identity provider, the service that signs
+   people in. It returns a signed confirmation token.
+5. The agent repeats the same call with the token attached.
+6. The server checks the token, as the list below describes.
+7. The server issues the permit and records who authorised it.
 
 Notice step 2 comes before step 3. Asking someone to confirm a call they could never make would
-reveal which tools exist. Part 11 records the weakness that remains: in this model the
-confirmation is a field the client sends, so a dishonest client could forge it (ADR-0011).
+reveal which tools exist.
+
+### 5.5 A confirmation the agent cannot write
+
+The first version took the confirmation as a plain field: `{"confirmed": true, "confirmedBy":
+"off-7"}`. The agent's side of the connection sends that field, so the agent could write it
+itself. A control that the party it controls can satisfy is not a control.
+
+A confirmation is now a token. A token is a short piece of signed data that says who someone is and
+what they approved. This one is signed with ES256 (see 6.2) by the identity provider, so only the
+identity provider can make one. The server accepts it only when all of these hold (ADR-0013):
+
+1. **The signature checks** against an identity provider key the server already trusts.
+2. **It is a confirmation.** The type is fixed, so a correctly signed login token from the same
+   provider does not count.
+3. **It is for this server.** A token for a different service is refused.
+4. **It is for this call.** The token carries the fingerprint of the tool and its arguments. A
+   confirmation for issuing a permit on case C1 does not issue one on case C2.
+5. **It is from this officer.** A token for off-8 cannot complete a call made for off-7.
+6. **It is fresh.** It lives at most five minutes. An officer approves something they are looking
+   at, and a token valid for a day would be a standing permission.
+7. **It has not been used.** Each token has an id. The server stores spent ids in SQLite, so a
+   restart does not reopen a window to replay one.
+
+**Example.** Officer off-7 approves the permit for case C1 at 10:00:00. The token expires at
+10:05:00. The agent sends it at 10:00:04 and the permit is issued. At 10:00:09 the agent sends the
+same token again. Its id is already stored, so the server refuses with "already used". If the
+agent had first sent it with case C2, that attempt would have failed on the fingerprint, and the
+token would still be unspent for C1. The id is stored only when every other check has passed.
+
+`issue_confirmation` in `adjudication/mcp_server/confirmation.py` plays the identity provider's
+part so the tests can make tokens. In a real deployment that private key lives with the identity
+provider and never on this server.
 
 ## Part 6. Talking to other agents: a card that cannot be forged
 
@@ -342,13 +392,18 @@ on every push.
 
 ### 8.1 The tests
 
-There are 74 tests in three files.
+There are 101 tests in four files.
 
 | File | Plain meaning | Tests |
 |---|---|---|
-| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses" | 36 |
+| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses", and the sentence splitter | 38 |
 | `tests/test_grounding_and_scope.py` | Evidence, tool scope, the rule bugs and resuming from SQLite | 18 |
-| `tests/test_protocols.py` | The MCP server, the signed card and the model client | 20 |
+| `tests/test_protocols.py` | The MCP server, the signed card and the model client | 19 |
+| `tests/test_confirmation.py` | The signed officer confirmation: each test sends a token wrong in exactly one way | 26 |
+
+Each check in the confirmation was switched off in turn to make sure a test fails without it. One
+did not at first: the algorithm and type check. The forged tokens failed on their signature
+before that check was reached. A correctly signed token of the wrong type now covers it.
 
 The model client tests start a small fake model server, so they need no real model. One of them
 found a bug: signing the card made a shallow copy, so a caller editing the signed card changed the
@@ -379,7 +434,7 @@ Everything except `verify_llm.py` runs on a laptop with no GPU, no network and n
 
 ```bash
 make install    # creates .venv and installs the package with its test tools
-make all        # lint, 74 tests, release gate, gate mutations, red team, topology comparison
+make all        # lint, 101 tests, release gate, gate mutations, red team, topology comparison
 make demo       # four cases end to end, with the audit log reconstructed
 ```
 
@@ -411,10 +466,10 @@ because that is the question an appeal asks (Part 2).
 
 These need work or someone else's judgement before anything like this runs for real.
 
-1. **The confirmation can be forged.** The MCP server accepts a confirmation field from the client. A real deployment must tie it to the officer, for example with a short-lived token from the council's identity provider that the server verifies.
+1. **The identity provider is simulated.** The server checks signed confirmations, but nothing here makes the officer approve the action at a real identity provider. That needs the council's identity team to issue tokens of this type, publish the public key and decide how the approval screen shows the call being approved.
 2. **The signing key has nowhere to live.** The card is signed with a key generated at run time. Production needs a managed key, a published public key and a plan for rotating it.
 3. **SQLite is one machine's file.** It survives a restart on one host. Several workers sharing cases need a shared store such as PostgreSQL.
-4. **Abbreviations still split badly.** "No. 14 High St." is cut into pieces by the sentence splitter. No measurement depends on one yet.
+4. **Some abbreviations still split on purpose.** "St.", "Rd." and "Dr." end a sentence as often as they abbreviate, so the splitter splits after them. A measurement written just after one is lost and the case goes to an officer. That is the safe direction, but it costs an officer's time.
 5. **The criteria are invented.** A real authority's rules, and its view on what counts as an officer's decision, need sign-off from its planning and legal teams.
 6. **Model extraction is measured but not on the decision path.** ADR-0008 records how reliable small models were. Using extraction for decisions would need that measured again on real applications.
 
@@ -436,6 +491,7 @@ The reasoning behind each choice is recorded in `docs/adr/`.
 | 0010 | Every finding quotes its evidence, and the metrics can now fail |
 | 0011 | The MCP server follows the 2026-07-28 specification and confirms irreversible actions |
 | 0012 | The A2A card uses the 1.0 format and an ES256 signature |
+| 0013 | An irreversible action needs a signed, single-use confirmation bound to the officer and the call |
 
 The guides in `docs/guides/` go deeper: architecture, design questions, concepts and the runbook.
 
@@ -461,9 +517,11 @@ The guides in `docs/guides/` go deeper: architecture, design questions, concepts
 | Extension (A2A) | A declared addition to an agent card beyond the standard fields | 6.1 |
 | Fail closed | Treating anything unclear as a refusal | 5.3 |
 | Finding | The result of checking one criterion, with its reason and evidence | 4.1 |
+| Fingerprint of a call | A hash of the tool name and its arguments, so a confirmation approves one exact call | 5.5 |
 | Grounded | A finding backed by a quoted sentence or an absence check | 4.1 |
 | Hash chaining | Linking log entries by fingerprints so any change is detectable | 2.3 |
 | HMAC | A signing method in which signer and checker share one secret | 6.2 |
+| Identity provider | The service that signs people in and vouches for who they are | 5.4 |
 | Interrupt | LangGraph's way of pausing a graph until outside input arrives | 7.1 |
 | JCS (RFC 8785) | The standard that defines the canonical form of JSON | 6.3 |
 | JSON | A standard text format for structured data | 3.3 |
@@ -480,6 +538,8 @@ The guides in `docs/guides/` go deeper: architecture, design questions, concepts
 | State | The shared record of a case that every node reads and updates | 2.1 |
 | Structured output | A model reply constrained to a stated JSON shape | 3.3 |
 | Supervisor | The node that makes every routing decision | 2.2 |
+| Single use | A token whose id is stored once spent, so it cannot be sent again | 5.5 |
 | Temperature | A model setting that controls randomness; 0 is meant to be repeatable | 3.1 |
+| Token | A short piece of signed data saying who someone is and what they approved | 5.5 |
 | Tool registry | The component that checks and records every tool call | 5.2 |
 | vLLM | A server for running language models efficiently on GPUs | 3.3 |

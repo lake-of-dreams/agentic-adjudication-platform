@@ -15,16 +15,27 @@ Two further parts of that specification shape this server (ADR-0011).
   uses this to stop for an explicit confirmation from the human it acts for,
   which the agent cannot supply on its own.
 
+The confirmation is a short-lived token signed by the identity provider and
+bound to the officer, this server and the exact call (ADR-0013). The client
+carries it and cannot make one.
+
 The shapes below are modelled on the specification's description; they are not
-a wire-level implementation of the protocol. In particular, a confirmation here
-is a field the client sends back, so a dishonest client could forge one. A real
-deployment must bind it to the human, for example with a short-lived token from
-the identity provider that the server verifies.
+a wire-level implementation of the protocol.
 """
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from cryptography.hazmat.primitives.asymmetric import ec
+
+from adjudication.mcp_server.confirmation import (
+    ConfirmationRejected,
+    UsedConfirmations,
+    call_digest,
+    verify_confirmation,
+)
 from adjudication.runtime.tools_registry import (
     ALL_CASES,
     Effect,
@@ -55,8 +66,13 @@ class DelegationContext:
 @dataclass
 class AdjudicationMCPServer:
     registry: ToolRegistry
-    # Confirmations already consumed, so one cannot be replayed for a second call.
-    _used_confirmations: set[str] = field(default_factory=set)
+    # Identity provider keys that may sign confirmations, by key id. None
+    # configured means no irreversible call can be confirmed: fail closed.
+    confirmation_keys: dict[str, ec.EllipticCurvePublicKey] = field(default_factory=dict)
+    audience: str = "adjudication-mcp"
+    # Spent confirmation ids. Pass a file path in production so they survive a restart.
+    used_confirmations: UsedConfirmations = field(default_factory=UsedConfirmations)
+    clock: Callable[[], float] = time.time
 
     def list_tools(self, ctx: DelegationContext) -> dict:
         """Filtered per caller. See ToolRegistry.manifest."""
@@ -94,17 +110,21 @@ class AdjudicationMCPServer:
                             "id": request_id, "kind": "confirmation",
                             "message": f"Confirm {name} for case {arguments.get('case_id')}. "
                                        "This cannot be undone.",
-                            "mustBeConfirmedBy": ctx.on_behalf_of}]}
-            if (answer.get("confirmed") is not True
-                    or answer.get("confirmedBy") != ctx.on_behalf_of):
-                self.registry._record(name, principal.id, False, "confirmation")
+                            "mustBeConfirmedBy": ctx.on_behalf_of,
+                            # what the identity provider must bind the token to
+                            "audience": self.audience,
+                            "call": call_digest(name, arguments)}]}
+            try:
+                verify_confirmation(
+                    answer.get("token") if isinstance(answer, dict) else None,
+                    trusted_keys=self.confirmation_keys, audience=self.audience,
+                    officer=ctx.on_behalf_of, tool=name, arguments=arguments,
+                    now=self.clock(), used=self.used_confirmations)
+            except ConfirmationRejected as exc:
+                self.registry._record(name, principal.id, False, f"confirmation: {exc.reason}")
                 return {"ok": False, "code": "NOT_CONFIRMED",
-                        "error": f"{name} needs confirmation from {ctx.on_behalf_of}"}
-            if request_id in self._used_confirmations:
-                self.registry._record(name, principal.id, False, "confirmation replayed")
-                return {"ok": False, "code": "NOT_CONFIRMED",
-                        "error": "this confirmation has already been used"}
-            self._used_confirmations.add(request_id)
+                        "error": f"{name} needs confirmation from {ctx.on_behalf_of}: "
+                                 f"{exc.reason}"}
 
         self.registry._record(name, principal.id, True, "ok")
         return {"ok": True, "result": tool.handler(**arguments),

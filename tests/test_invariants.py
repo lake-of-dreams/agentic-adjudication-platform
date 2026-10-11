@@ -89,6 +89,23 @@ def test_decimal_measurements_are_not_split():
     assert findings["C2"].satisfied is True
 
 
+def test_abbreviation_before_a_number_does_not_lose_the_number():
+    """'Height approx. 3.2 m' split at 'approx.' and the height went missing."""
+    findings = {f.criterion_code: f for f in evaluate(
+        "Site is No. 14 Orchard Row. Height approx. 3.2 m. Setback ca. 1.4 m.")}
+    assert findings["C2"].satisfied is True
+    assert findings["C2"].evidence[0].quote == "Height approx. 3.2 m"
+    assert findings["C1"].satisfied is True
+
+
+def test_a_street_abbreviation_still_ends_a_sentence():
+    """Joining across 'St.' would read the height as the setback and grant C1."""
+    findings = {f.criterion_code: f for f in evaluate(
+        "The setback is measured from Mill St. Height 3.2 m.")}
+    assert findings["C1"].satisfied is None
+    assert findings["C2"].satisfied is True
+
+
 def test_undetermined_is_not_treated_as_satisfied():
     findings = {f.criterion_code: f for f in evaluate("No numbers here.")}
     assert findings["C1"].satisfied is None

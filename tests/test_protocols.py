@@ -56,22 +56,13 @@ def test_irreversible_tool_asks_for_confirmation_first():
     assert req["kind"] == "confirmation" and req["mustBeConfirmedBy"] == "off-7"
 
 
-def test_confirmation_from_someone_else_is_rejected():
+def test_unsigned_confirmation_field_no_longer_counts():
+    """The field the first version accepted. The agent can write it itself (ADR-0013)."""
     server = AdjudicationMCPServer(default_registry())
     rid = server.call_tool("issue_permit", {"case_id": "C1"}, _ctx())["inputRequests"][0]["id"]
     out = server.call_tool("issue_permit", {"case_id": "C1"}, _ctx(),
-                           {rid: {"confirmed": True, "confirmedBy": "agent-1"}})
+                           {rid: {"confirmed": True, "confirmedBy": "off-7"}})
     assert out["code"] == "NOT_CONFIRMED"
-
-
-def test_confirmed_call_runs_once_and_cannot_be_replayed():
-    server = AdjudicationMCPServer(default_registry())
-    rid = server.call_tool("issue_permit", {"case_id": "C1"}, _ctx())["inputRequests"][0]["id"]
-    answer = {rid: {"confirmed": True, "confirmedBy": "off-7"}}
-    first = server.call_tool("issue_permit", {"case_id": "C1"}, _ctx(), answer)
-    assert first["ok"] and first["result"] == {"case_id": "C1", "issued": True}
-    again = server.call_tool("issue_permit", {"case_id": "C1"}, _ctx(), answer)
-    assert again["code"] == "NOT_CONFIRMED"
 
 
 def test_unauthorised_call_is_denied_before_any_confirmation():

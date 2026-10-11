@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Agentic adjudication under regulatory constraint"
 requires-python = ">=3.12"
 dependencies = [
-    "langgraph>=1.2",
+    "langgraph>=1.2.14",
     "langgraph-checkpoint-sqlite>=3.1",
     "cryptography>=46",
     "rfc8785>=0.1.4",

@@ -40,9 +40,44 @@ _PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 # the only place not to split.
 _SENT = re.compile(r"(?<!\d)[.;\n]|[.;\n](?!\d)")
 
+# Full stops that end an abbreviation, not a sentence. "Height approx. 3.2 m"
+# split into "Height approx" and "3.2 m", so the height rule found no height
+# and the applicant was asked for a figure they had given.
+#
+# Only abbreviations that cannot end a sentence are listed, each with what must
+# follow it. Joining two real sentences is the dangerous mistake: "setback is
+# measured from Mill St. Height 5.2 m" as one sentence gives a setback of 5.2 m.
+# Splitting too often only loses a figure, and a lost figure goes to an
+# officer. So St., Rd. and Dr. still split. ADR-0005.
+_ABBREV_BEFORE_NUMBER = frozenset({"approx", "no", "ca"})
+_ABBREV_BEFORE_NAME = frozenset({"mr", "mrs", "ms"})
+_WORD_BEFORE = re.compile(r"([A-Za-z]+)$")
+
+
+def _is_abbreviation(text: str, dot: int) -> bool:
+    if text[dot] != ".":
+        return False
+    word = _WORD_BEFORE.search(text, 0, dot)
+    if word is None:
+        return False
+    word = word.group(1).lower()
+    after = text[dot + 1:].lstrip(" ")
+    if word in _ABBREV_BEFORE_NUMBER:
+        return after[:1].isdigit()
+    if word in _ABBREV_BEFORE_NAME:
+        return after[:1].isupper()
+    return False
+
 
 def _sentences(text: str) -> list[str]:
-    return _SENT.split(text)
+    out, start = [], 0
+    for m in _SENT.finditer(text):
+        if _is_abbreviation(text, m.start()):
+            continue
+        out.append(text[start:m.start()])
+        start = m.end()
+    out.append(text[start:])
+    return out
 
 
 @dataclass(frozen=True)

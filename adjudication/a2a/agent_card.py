@@ -17,19 +17,16 @@ extension, the place A2A 1.0 gives agents for anything beyond the core fields.
 """
 from __future__ import annotations
 
-import base64
 import copy
 import json
 from typing import Any
 
 import rfc8785
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.asymmetric.utils import (
-    decode_dss_signature,
-    encode_dss_signature,
-)
+
+from adjudication.runtime.jws import b64 as _b64
+from adjudication.runtime.jws import es256_sign, es256_verify, new_key
+from adjudication.runtime.jws import unb64 as _unb64
 
 AUTHORITY_EXTENSION = "https://adjudication.example.org/a2a/extensions/authority/v1"
 
@@ -73,16 +70,8 @@ def jcs_canonicalise(obj: Any) -> bytes:
     return rfc8785.dumps(obj)
 
 
-def _b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def _unb64(text: str) -> bytes:
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
-
-
 def new_signing_key() -> ec.EllipticCurvePrivateKey:
-    return ec.generate_private_key(ec.SECP256R1())
+    return new_key()
 
 
 def sign_card(card: dict, key: ec.EllipticCurvePrivateKey, kid: str = "key-1",
@@ -95,10 +84,7 @@ def sign_card(card: dict, key: ec.EllipticCurvePrivateKey, kid: str = "key-1",
         header["jku"] = jku
     protected = _b64(json.dumps(header, separators=(",", ":")).encode())
     signing_input = f"{protected}.{_b64(jcs_canonicalise(unsigned))}".encode()
-    der = key.sign(signing_input, ec.ECDSA(hashes.SHA256()))
-    # JWS ES256 wants the raw 64-byte r||s form, not the DER that cryptography returns.
-    r, s = decode_dss_signature(der)
-    raw = r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    raw = es256_sign(key, signing_input)
     existing = list(card.get("signatures", []))
     return {**unsigned, "signatures": [*existing, {"protected": protected, "signature": _b64(raw)}]}
 
@@ -118,14 +104,9 @@ def verify_card(signed: dict, public_keys: dict[str, ec.EllipticCurvePublicKey])
             key = public_keys.get(header.get("kid"))
             if key is None or header.get("alg") != "ES256":
                 continue
-            raw = _unb64(entry["signature"])
-            if len(raw) != 64:
-                continue
-            der = encode_dss_signature(int.from_bytes(raw[:32], "big"),
-                                       int.from_bytes(raw[32:], "big"))
-            key.verify(der, f"{entry['protected']}.{payload}".encode(),
-                       ec.ECDSA(hashes.SHA256()))
-            return True
-        except (InvalidSignature, KeyError, ValueError, TypeError):
+            if es256_verify(key, f"{entry['protected']}.{payload}".encode(),
+                            _unb64(entry["signature"])):
+                return True
+        except (KeyError, ValueError, TypeError):
             continue
     return False

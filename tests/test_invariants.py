@@ -246,3 +246,39 @@ def test_resume_does_not_write_the_suspension_twice():
     actions = [e.action for e in audit.for_case("resume-2")]
     assert actions.count("suspended_for_officer") == 1
     assert actions.count("decided") == 1
+
+
+# ADR-0014. Before the reply was checked, any string became the decision.
+@pytest.mark.parametrize("reply", [
+    {"officer_id": "off-9", "decision": "APPROVE_EVERYTHING"},
+    {"officer_id": "off-9", "decision": "REFER_TO_OFFICER"},
+    {"officer_id": "off-9"},
+    {"decision": "GRANT"},
+    {"officer_id": "  ", "decision": "GRANT"},
+    "GRANT",
+])
+def test_a_malformed_officer_reply_decides_nothing(reply):
+    res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id="reply-bad")
+    assert "__interrupt__" in res
+    with pytest.raises(Exception):  # noqa: B017 - pydantic's or ours, either refuses
+        graph.invoke(Command(resume=reply), cfg)
+    assert "decided" not in [e.action for e in audit.for_case("reply-bad")]
+    assert graph.get_state(cfg).values.get("decision") == "REFER_TO_OFFICER"
+
+
+def test_a_case_is_still_waiting_after_a_malformed_reply():
+    res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id="reply-retry")
+    with pytest.raises(Exception):  # noqa: B017
+        graph.invoke(Command(resume={"officer_id": "off-9", "decision": "MAYBE"}), cfg)
+    out = graph.invoke(Command(resume={"officer_id": "off-9", "decision": "REFUSE",
+                                       "rationale": "height exceeds the limit"}), cfg)
+    assert out["decision"] == "REFUSE"
+    actions = [e.action for e in audit.for_case("reply-retry")]
+    assert actions.count("decided") == 1 and actions.count("suspended_for_officer") == 1
+
+
+def test_the_interrupt_tells_the_client_what_a_reply_looks_like():
+    res, _, _, _ = run(NARRATIVES[1], "STANDARD", case_id="reply-schema")
+    schema = res["__interrupt__"][0].response_schema
+    assert set(schema["required"]) == {"officer_id", "decision"}
+    assert schema["properties"]["decision"]["enum"] == ["GRANT", "REFUSE", "REQUEST_INFORMATION"]

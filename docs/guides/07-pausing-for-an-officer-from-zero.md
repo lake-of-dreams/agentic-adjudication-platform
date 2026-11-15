@@ -42,7 +42,7 @@ its own step, which finishes before the pause and is never run again.
 
 The code is in `adjudication/agents/graph.py`. The tests are in `tests/test_invariants.py` and
 `tests/test_grounding_and_scope.py`. The decision record is ADR-0009, which was corrected when the
-bug in Part 4 was found. The library is LangGraph 1.2.14 with langgraph-checkpoint-sqlite 3.1.1.
+bug in Part 4 was found. The library was LangGraph 1.2.14 with langgraph-checkpoint-sqlite 3.1.1 when it was found; the tests now run on 1.2.22 and 3.1.3.
 Every log count in this guide is real output from the code.
 
 Simplified for teaching: the officer's answer is passed in by a test or the demo script, not by a

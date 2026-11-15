@@ -8,7 +8,19 @@ officer finally gets to the queue.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, TypedDict
+
+
+class OfficerReply(TypedDict):
+    """What an officer sends to resume a referred case.
+
+    interrupt() validates the reply against this before the node sees it. An
+    unnamed officer, or a decision outside the three an officer can take, is
+    refused and the case stays paused.
+    """
+    officer_id: str
+    decision: Literal["GRANT", "REFUSE", "REQUEST_INFORMATION"]
+    rationale: NotRequired[str]
 
 
 class CaseState(TypedDict, total=False):

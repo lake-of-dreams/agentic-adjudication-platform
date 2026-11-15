@@ -30,8 +30,9 @@ from adjudication.retrieval.hybrid import Doc, HybridRetriever
 from adjudication.runtime import guardrails as g
 from adjudication.runtime.audit import AuditLog
 from adjudication.runtime.redaction import redact
+from adjudication.runtime.tracing import traced
 
-from .state import CaseState
+from .state import CaseState, OfficerReply
 
 
 def durable_checkpointer(path: str) -> SqliteSaver:
@@ -162,11 +163,17 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
         officer = interrupt({"case_id": state["case_id"],
                              "reason": state.get("escalation_reason"),
                              "findings": state.get("findings"),
-                             "ask": "GRANT, REFUSE or REQUEST_INFORMATION"})
-        audit.append(state["case_id"], f"officer:{officer.get('officer_id','unknown')}",
-                     "decided", {"decision": officer.get("decision")})
-        return {"officer_decision": officer.get("decision"),
-                "decision": officer.get("decision"),
+                             "ask": "GRANT, REFUSE or REQUEST_INFORMATION"},
+                            response_schema=OfficerReply)
+        # The reply has been checked against OfficerReply by now. Before that
+        # check, {"decision": "APPROVE_EVERYTHING"} became the case's decision
+        # and the log said officer:unknown had decided it.
+        if not officer["officer_id"].strip():
+            raise ValueError("an officer's reply must name the officer")
+        audit.append(state["case_id"], f"officer:{officer['officer_id']}",
+                     "decided", {"decision": officer["decision"]})
+        return {"officer_decision": officer["decision"],
+                "decision": officer["decision"],
                 "rationale": officer.get("rationale", "officer decision"),
                 "trace": ["escalate:resumed"]}
 
@@ -175,15 +182,15 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
 
     sg = StateGraph(CaseState)
     retry = RetryPolicy(max_attempts=3, initial_interval=0.05, backoff_factor=2.0)
-    sg.add_node("intake", intake, retry_policy=retry)
-    sg.add_node("guard_input", guard_input)
-    sg.add_node("retrieve", retrieve, retry_policy=retry)
-    sg.add_node("guard_context", guard_context)
-    sg.add_node("assess", assess)
-    sg.add_node("supervisor", supervisor)
-    sg.add_node("decide", decide)
-    sg.add_node("refer", refer)
-    sg.add_node("escalate", escalate)
+    sg.add_node("intake", traced("intake", intake), retry_policy=retry)
+    sg.add_node("guard_input", traced("guard_input", guard_input))
+    sg.add_node("retrieve", traced("retrieve", retrieve), retry_policy=retry)
+    sg.add_node("guard_context", traced("guard_context", guard_context))
+    sg.add_node("assess", traced("assess", assess))
+    sg.add_node("supervisor", traced("supervisor", supervisor))
+    sg.add_node("decide", traced("decide", decide))
+    sg.add_node("refer", traced("refer", refer))
+    sg.add_node("escalate", traced("escalate", escalate))
 
     sg.add_edge(START, "intake")
     sg.add_edge("intake", "guard_input")

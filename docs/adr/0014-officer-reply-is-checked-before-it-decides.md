@@ -29,10 +29,13 @@ the client as JSON Schema so a form can be drawn from it.
 * Eight tests. Six malformed replies each leave the audit log without a `decided` entry and the
   case still referred. One sends a malformed reply and then a good one to the same case, and checks
   the case is decided once and was suspended once. One reads the schema off the interrupt.
-* A refused reply does not consume the pause. The case can still be resumed with a valid one.
+* A reply refused by the shape check does not consume the pause. The case can still be resumed
+  with a valid one. ADR-0017 found that this is not true of a reply refused after the check.
 * The minimum LangGraph version is now 1.2.22, the release this was run on.
 
 ## Open questions
 * The reply names an officer; it does not prove one. Whoever can reach the resume call can type any
   officer's id. Issuing a permit already needs a signed confirmation (ADR-0013). Resuming a case
   should be bound to a verified identity the same way before this runs for real.
+  **Closed by ADR-0017:** the reply carries a signed confirmation bound to the officer, the case
+  and the decision.

@@ -11,9 +11,11 @@ import pytest
 from langgraph.types import Command
 
 from adjudication.agents.graph import build_graph, durable_checkpointer
+from adjudication.agents.officer import signed_reply
 from adjudication.data.corpus import CORPUS
 from adjudication.domain.criteria import check_heritage, check_setback, evaluate
 from adjudication.runtime.audit import AuditLog
+from adjudication.runtime.jws import new_key
 from adjudication.runtime.tools_registry import (
     ALL_CASES,
     Effect,
@@ -142,9 +144,12 @@ def test_case_resumes_in_a_new_graph_from_sqlite(tmp_path):
     del first
 
     audit = AuditLog()
-    second = build_graph(CORPUS, audit, now=NOW, checkpointer=durable_checkpointer(db))
-    out = second.invoke(Command(resume={"officer_id": "off-3", "decision": "GRANT",
-                                        "rationale": "revised plans"}), cfg)
+    idp = new_key()
+    second = build_graph(CORPUS, audit, now=NOW, checkpointer=durable_checkpointer(db),
+                         officer_keys={"idp-1": idp.public_key()})
+    out = second.invoke(Command(resume=signed_reply(
+        idp, "idp-1", case_id="durable-1", officer_id="off-3", decision="GRANT",
+        rationale="revised plans")), cfg)
     assert out["officer_decision"] == "GRANT"
     assert out["case_id"] == "durable-1"
     assert any(e.actor == "officer:off-3" for e in audit.for_case("durable-1"))

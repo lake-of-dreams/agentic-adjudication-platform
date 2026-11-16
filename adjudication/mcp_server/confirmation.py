@@ -93,7 +93,7 @@ class UsedConfirmations:
 
 def verify_confirmation(token: str, *, trusted_keys: dict[str, ec.EllipticCurvePublicKey],
                         audience: str, officer: str, tool: str, arguments: dict[str, Any],
-                        now: float, used: UsedConfirmations) -> dict:
+                        now: float, used: UsedConfirmations | None) -> dict:
     """Returns the claims when the token confirms exactly this call, else raises.
 
     The id is claimed last. A token that fails any other check stays unspent,
@@ -137,6 +137,8 @@ def verify_confirmation(token: str, *, trusted_keys: dict[str, ec.EllipticCurveP
     jti = claims.get("jti")
     if not isinstance(jti, str) or not jti:
         raise ConfirmationRejected("malformed")
-    if not used.claim(jti, exp, now):
+    # used=None checks everything except single use, for a caller whose own
+    # state already allows the action only once (ADR-0017).
+    if used is not None and not used.claim(jti, exp, now):
         raise ConfirmationRejected("already used")
     return claims

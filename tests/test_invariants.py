@@ -14,21 +14,29 @@ import pytest
 from langgraph.types import Command
 
 from adjudication.agents.graph import build_graph
+from adjudication.agents.officer import signed_reply
 from adjudication.data.corpus import CORPUS
 from adjudication.domain.clock import AUTOMATION_BUDGET, Clock
 from adjudication.domain.criteria import evaluate
 from adjudication.domain.model import RiskTier
 from adjudication.runtime import guardrails as g
 from adjudication.runtime.audit import AuditEntry, AuditLog, TamperDetected
+from adjudication.runtime.jws import new_key
 from adjudication.runtime.redaction import redact
 from adjudication.runtime.tools_registry import Effect, Principal, Tool, ToolDenied, ToolRegistry
 
 NOW = dt.datetime(2026, 9, 14, 12, 0, tzinfo=dt.UTC)
+IDP = new_key()
+KEYS = {"idp-1": IDP.public_key()}
+
+
+def reply(case_id: str, decision: str, officer: str = "off-9", **kw) -> dict:
+    return signed_reply(IDP, "idp-1", case_id=case_id, officer_id=officer, decision=decision, **kw)
 
 
 def run(narrative: str, tier: str = "STANDARD", case_id: str = "T1"):
     audit = AuditLog()
-    graph = build_graph(CORPUS, audit, now=NOW)
+    graph = build_graph(CORPUS, audit, now=NOW, officer_keys=KEYS)
     cfg = {"configurable": {"thread_id": case_id}}
     res = graph.invoke({"case_id": case_id, "narrative": narrative, "risk_tier": tier,
                         "trace": [], "guard_events": []}, cfg)
@@ -229,8 +237,8 @@ def test_every_tier_reserves_headroom(tier):
 def test_interrupt_suspends_and_resume_continues_same_case():
     res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id="resume-1")
     assert "__interrupt__" in res
-    out = graph.invoke(Command(resume={"officer_id": "off-9", "decision": "GRANT",
-                                       "rationale": "revised plans acceptable"}), cfg)
+    out = graph.invoke(Command(resume=reply("resume-1", "GRANT",
+                                            rationale="revised plans acceptable")), cfg)
     assert out["decision"] == "GRANT"
     assert out["officer_decision"] == "GRANT"
     actors = [e.actor for e in audit.for_case("resume-1")]
@@ -242,26 +250,27 @@ def test_resume_does_not_write_the_suspension_twice():
     An audit write placed before interrupt() ran twice, so the log said the case
     was suspended twice."""
     res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id="resume-2")
-    graph.invoke(Command(resume={"officer_id": "off-9", "decision": "GRANT"}), cfg)
+    graph.invoke(Command(resume=reply("resume-2", "GRANT")), cfg)
     actions = [e.action for e in audit.for_case("resume-2")]
     assert actions.count("suspended_for_officer") == 1
     assert actions.count("decided") == 1
 
 
 # ADR-0014. Before the reply was checked, any string became the decision.
-@pytest.mark.parametrize("reply", [
-    {"officer_id": "off-9", "decision": "APPROVE_EVERYTHING"},
-    {"officer_id": "off-9", "decision": "REFER_TO_OFFICER"},
-    {"officer_id": "off-9"},
-    {"decision": "GRANT"},
-    {"officer_id": "  ", "decision": "GRANT"},
+@pytest.mark.parametrize("bad", [
+    {"officer_id": "off-9", "decision": "APPROVE_EVERYTHING", "confirmation": "x"},
+    {"officer_id": "off-9", "decision": "REFER_TO_OFFICER", "confirmation": "x"},
+    {"officer_id": "off-9", "confirmation": "x"},
+    {"decision": "GRANT", "confirmation": "x"},
+    {"officer_id": "  ", "decision": "GRANT", "confirmation": "x"},
+    {"officer_id": "off-9", "decision": "GRANT"},
     "GRANT",
 ])
-def test_a_malformed_officer_reply_decides_nothing(reply):
+def test_a_malformed_officer_reply_decides_nothing(bad):
     res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id="reply-bad")
     assert "__interrupt__" in res
     with pytest.raises(Exception):  # noqa: B017 - pydantic's or ours, either refuses
-        graph.invoke(Command(resume=reply), cfg)
+        graph.invoke(Command(resume=bad), cfg)
     assert "decided" not in [e.action for e in audit.for_case("reply-bad")]
     assert graph.get_state(cfg).values.get("decision") == "REFER_TO_OFFICER"
 
@@ -269,9 +278,10 @@ def test_a_malformed_officer_reply_decides_nothing(reply):
 def test_a_case_is_still_waiting_after_a_malformed_reply():
     res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id="reply-retry")
     with pytest.raises(Exception):  # noqa: B017
-        graph.invoke(Command(resume={"officer_id": "off-9", "decision": "MAYBE"}), cfg)
-    out = graph.invoke(Command(resume={"officer_id": "off-9", "decision": "REFUSE",
-                                       "rationale": "height exceeds the limit"}), cfg)
+        graph.invoke(Command(resume={"officer_id": "off-9", "decision": "MAYBE",
+                                     "confirmation": "x"}), cfg)
+    out = graph.invoke(Command(resume=reply("reply-retry", "REFUSE",
+                                            rationale="height exceeds the limit")), cfg)
     assert out["decision"] == "REFUSE"
     actions = [e.action for e in audit.for_case("reply-retry")]
     assert actions.count("decided") == 1 and actions.count("suspended_for_officer") == 1
@@ -280,5 +290,86 @@ def test_a_case_is_still_waiting_after_a_malformed_reply():
 def test_the_interrupt_tells_the_client_what_a_reply_looks_like():
     res, _, _, _ = run(NARRATIVES[1], "STANDARD", case_id="reply-schema")
     schema = res["__interrupt__"][0].response_schema
-    assert set(schema["required"]) == {"officer_id", "decision"}
+    assert set(schema["required"]) == {"officer_id", "decision", "confirmation"}
     assert schema["properties"]["decision"]["enum"] == ["GRANT", "REFUSE", "REQUEST_INFORMATION"]
+
+
+# ADR-0017. The shape is right in every case below; the signature is what fails.
+def _paused(case_id: str):
+    res, audit, graph, cfg = run(NARRATIVES[1], "STANDARD", case_id=case_id)
+    assert "__interrupt__" in res
+    return audit, graph, cfg
+
+
+def _refused(graph, cfg, audit, case_id: str, resume: dict, why: str):
+    with pytest.raises(Exception, match=why):
+        graph.invoke(Command(resume=resume), cfg)
+    assert "decided" not in [e.action for e in audit.for_case(case_id)]
+    assert graph.get_state(cfg).values.get("decision") == "REFER_TO_OFFICER"
+
+
+def test_typing_another_officers_id_decides_nothing():
+    audit, graph, cfg = _paused("sig-typed")
+    typed = {"officer_id": "off-9", "decision": "GRANT", "confirmation": "not-a-token"}
+    _refused(graph, cfg, audit, "sig-typed", typed, "malformed")
+
+
+def test_a_decision_signed_by_an_untrusted_key_decides_nothing():
+    audit, graph, cfg = _paused("sig-key")
+    forged = signed_reply(new_key(), "idp-1", case_id="sig-key", officer_id="off-9", decision="GRANT")
+    _refused(graph, cfg, audit, "sig-key", forged, "bad signature")
+
+
+def test_one_officers_signature_cannot_carry_another_officers_name():
+    audit, graph, cfg = _paused("sig-name")
+    r = reply("sig-name", "GRANT", officer="off-8")
+    r["officer_id"] = "off-9"
+    _refused(graph, cfg, audit, "sig-name", r, "someone else")
+
+
+def test_a_signed_request_for_information_cannot_be_turned_into_a_grant():
+    audit, graph, cfg = _paused("sig-decision")
+    r = reply("sig-decision", "REQUEST_INFORMATION")
+    r["decision"] = "GRANT"
+    _refused(graph, cfg, audit, "sig-decision", r, "different call")
+
+
+def test_a_decision_signed_for_one_case_cannot_decide_another():
+    audit, graph, cfg = _paused("sig-case-b")
+    _refused(graph, cfg, audit, "sig-case-b", reply("sig-case-a", "GRANT"), "different call")
+
+
+def test_no_identity_provider_key_means_no_case_can_be_resumed():
+    audit = AuditLog()
+    graph = build_graph(CORPUS, audit, now=NOW)  # no officer_keys
+    cfg = {"configurable": {"thread_id": "sig-nokey"}}
+    graph.invoke({"case_id": "sig-nokey", "narrative": NARRATIVES[1], "risk_tier": "STANDARD",
+                  "trace": [], "guard_events": []}, cfg)
+    _refused(graph, cfg, audit, "sig-nokey", reply("sig-nokey", "GRANT"), "does not trust")
+
+
+def test_a_refused_signature_is_not_spent_and_the_right_case_still_resumes():
+    audit, graph, cfg = _paused("sig-retry")
+    good = reply("sig-retry", "REFUSE", rationale="height exceeds the limit")
+    tampered = {**good, "decision": "GRANT"}
+    _refused(graph, cfg, audit, "sig-retry", tampered, "different call")
+    out = graph.invoke(Command(resume=good), cfg)
+    assert out["decision"] == "REFUSE"
+    assert [e.actor for e in audit.for_case("sig-retry")][-1] == "officer:off-9"
+
+
+def test_a_decided_case_cannot_be_decided_again():
+    """Why the reply's token is not single-use: the case is."""
+    audit, graph, cfg = _paused("sig-once")
+    first = graph.invoke(Command(resume=reply("sig-once", "REQUEST_INFORMATION")), cfg)
+    assert first["decision"] == "REQUEST_INFORMATION"
+    again = graph.invoke(Command(resume=reply("sig-once", "GRANT")), cfg)
+    assert again["decision"] == "REQUEST_INFORMATION"
+    assert [e.action for e in audit.for_case("sig-once")].count("decided") == 1
+
+
+def test_an_expired_signature_decides_nothing():
+    audit, graph, cfg = _paused("sig-old")
+    import time
+    old = reply("sig-old", "GRANT", now=time.time() - 3600)
+    _refused(graph, cfg, audit, "sig-old", old, "expired")

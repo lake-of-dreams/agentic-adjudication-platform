@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import datetime as dt
 import sqlite3
+import time
+from collections.abc import Callable
 
+from cryptography.hazmat.primitives.asymmetric import ec
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import RetryPolicy, interrupt
 
+from adjudication.agents.officer import reply_model
 from adjudication.domain.clock import Clock
 from adjudication.domain.criteria import evaluate
 from adjudication.domain.model import RiskTier
@@ -32,7 +36,7 @@ from adjudication.runtime.audit import AuditLog
 from adjudication.runtime.redaction import redact
 from adjudication.runtime.tracing import traced
 
-from .state import CaseState, OfficerReply
+from .state import CaseState
 
 
 def durable_checkpointer(path: str) -> SqliteSaver:
@@ -46,8 +50,13 @@ def durable_checkpointer(path: str) -> SqliteSaver:
 
 
 def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = None,
-                checkpointer: BaseCheckpointSaver | None = None):
+                checkpointer: BaseCheckpointSaver | None = None, *,
+                officer_keys: dict[str, ec.EllipticCurvePublicKey] | None = None,
+                wall_clock: Callable[[], float] = time.time):
+    """officer_keys are the identity provider keys that may sign an officer's
+    decision, by key id. With none, no referred case can be resumed: fail closed."""
     retriever = HybridRetriever(corpus)
+    trusted = dict(officer_keys or {})
     NOW = now or dt.datetime.now(dt.UTC)
 
     def intake(state: CaseState) -> CaseState:
@@ -164,12 +173,15 @@ def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = No
                              "reason": state.get("escalation_reason"),
                              "findings": state.get("findings"),
                              "ask": "GRANT, REFUSE or REQUEST_INFORMATION"},
-                            response_schema=OfficerReply)
-        # The reply has been checked against OfficerReply by now. Before that
-        # check, {"decision": "APPROVE_EVERYTHING"} became the case's decision
-        # and the log said officer:unknown had decided it.
-        if not officer["officer_id"].strip():
-            raise ValueError("an officer's reply must name the officer")
+                            response_schema=reply_model(state["case_id"], trusted, wall_clock))
+        # By here the reply has the right shape and was signed by this officer
+        # for this decision on this case. Before the shape check,
+        # {"decision": "APPROVE_EVERYTHING"} became the case's decision and the
+        # log said officer:unknown had decided it. Before the signature check,
+        # anyone who could resume a case could type an officer's id. Nothing
+        # after this line may refuse the reply: LangGraph has recorded it, and
+        # a recorded reply is the only one the case will ever see.
+        officer = officer.model_dump(exclude_none=True)
         audit.append(state["case_id"], f"officer:{officer['officer_id']}",
                      "decided", {"decision": officer["decision"]})
         return {"officer_decision": officer["decision"],

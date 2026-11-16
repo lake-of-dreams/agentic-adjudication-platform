@@ -8,8 +8,10 @@ import sys
 from langgraph.types import Command
 
 from adjudication.agents.graph import build_graph
+from adjudication.agents.officer import signed_reply
 from adjudication.data.corpus import CORPUS
 from adjudication.runtime.audit import AuditLog
+from adjudication.runtime.jws import new_key
 
 NOW = dt.datetime(2026, 9, 14, 12, 0, tzinfo=dt.UTC)
 
@@ -30,7 +32,10 @@ CASES = [
 
 def main() -> int:
     audit = AuditLog()
-    graph = build_graph(CORPUS, audit, now=NOW)
+    # Stands in for the council's identity provider, which signs each officer's
+    # decision. The graph is given only the public half.
+    idp = new_key()
+    graph = build_graph(CORPUS, audit, now=NOW, officer_keys={"idp-1": idp.public_key()})
     for i, (label, tier, narrative) in enumerate(CASES, start=1):
         case_id = f"CASE-{i}"
         cfg = {"configurable": {"thread_id": case_id}}
@@ -46,8 +51,10 @@ def main() -> int:
             print(f"  SUSPENDED for officer: {payload['reason']}")
             # could exit the process here. state is checkpointed.
             result = graph.invoke(
-                Command(resume={"officer_id": "off-014", "decision": "REQUEST_INFORMATION",
-                                "rationale": "applicant to supply revised plans"}), cfg)
+                Command(resume=signed_reply(
+                    idp, "idp-1", case_id=case_id, officer_id="off-014",
+                    decision="REQUEST_INFORMATION",
+                    rationale="applicant to supply revised plans")), cfg)
 
         print(f"  decision : {result.get('decision')}")
         print(f"  rationale: {result.get('rationale')}")

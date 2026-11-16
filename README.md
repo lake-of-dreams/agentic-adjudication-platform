@@ -473,7 +473,22 @@ does not match raises an error, writes nothing to the log, and leaves the case w
 officer can answer again. The same description is published with the pause, so a client can draw
 the form from it. ADR-0014 records the change.
 
-The reply names an officer. It does not yet prove one (Part 11).
+That left a reply naming an officer without proving it. Whoever could reach the resume call could
+type any officer's id. So the reply now also carries a signed confirmation, the same kind of token
+that guards issuing a permit (5.5), bound to the officer, the case and the decision.
+
+**Example.** Officer off-9 signs "request information" for Application B. Changing the decision in
+that reply to "grant" fails, because the signature covers the decision. Sending the same signed
+reply to a different case fails, because it covers the case. A token signed by a key the system
+does not trust fails. In each case the log gains no entry and the case waits.
+
+Where the check runs turned out to matter. The first version checked the signature after the
+pause, inside the step. A forged reply with the right shape was refused there, as intended. Then
+the genuine reply was refused too. LangGraph had already recorded the forged reply as the answer
+to that pause, and it replayed it on every later attempt. One bad reply froze the case for good.
+The signature is now checked as part of the reply's shape, before anything is recorded. ADR-0017
+records the finding, and the rule it teaches: a check that can refuse a reply belongs before the
+pause accepts it, never after.
 
 ### 7.4 Why the checkpoints moved to a database file
 
@@ -493,11 +508,11 @@ on every push.
 
 ### 8.1 The tests
 
-There are 125 tests in six files.
+There are 135 tests in six files.
 
 | File | Plain meaning | Tests |
 |---|---|---|
-| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses", the sentence splitter, the one-number rule, resuming once and refusing a malformed officer reply | 52 |
+| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses", the sentence splitter, the one-number rule, resuming once, and refusing a malformed, forged or misdirected officer reply | 62 |
 | `tests/test_grounding_and_scope.py` | Evidence, tool scope, the rule bugs and resuming from SQLite | 18 |
 | `tests/test_protocols.py` | The MCP server, the signed card and the model client | 19 |
 | `tests/test_confirmation.py` | The signed officer confirmation: each test sends a token wrong in exactly one way | 26 |
@@ -562,7 +577,7 @@ Everything except `verify_llm.py` runs on a laptop with no GPU, no network and n
 
 ```bash
 make install    # creates .venv and installs the package with its test tools
-make all        # lint, 125 tests, release gate, gate mutations, red team, topology comparison
+make all        # lint, 135 tests, release gate, gate mutations, red team, topology comparison
 make demo       # four cases end to end, with the audit log reconstructed
 ```
 
@@ -594,15 +609,14 @@ because that is the question an appeal asks (Part 2).
 
 These need work or someone else's judgement before anything like this runs for real.
 
-1. **An officer's reply is not yet tied to a verified identity.** Resuming a case checks the reply's shape and names an officer (7.3). Whoever can reach the resume call can type any officer's id. It needs the same signed binding the permit confirmation has.
-2. **The MCP endpoint has no sign-in.** Over standard input and output the process belongs to one officer. Over HTTP the caller's identity must come from a verified access token, which is not built (ADR-0015).
-3. **The identity provider is simulated.** The server checks signed confirmations, but nothing here makes the officer approve the action at a real identity provider. That needs the council's identity team to issue tokens of this type, publish the public key and decide how the approval screen shows the call being approved.
-4. **The signing key has nowhere to live.** The card is signed with a key generated at run time. Production needs a managed key, a published public key and a plan for rotating it.
-5. **SQLite is one machine's file.** It survives a restart on one host. Several workers sharing cases need a shared store such as PostgreSQL.
-6. **Some abbreviations still split on purpose.** "St.", "Rd." and "Dr." end a sentence as often as they abbreviate, so the splitter splits after them. A measurement written just after one is lost and the case goes to an officer. That is the safe direction, but it costs an officer's time.
-7. **The criteria are invented.** A real authority's rules, and its view on what counts as an officer's decision, need sign-off from its planning and legal teams.
-8. **Model extraction is measured but not on the decision path.** ADR-0008 records how reliable small models were. Using extraction for decisions would need that measured again on real applications.
-9. **The one-number rule sends some clear cases to a person.** "At No. 14 the setback is 1.4 m" holds two numbers, so C1 is undetermined although the applicant was clear. That is the safe direction, chosen on purpose. Reading which number goes with which word needs a parser that understands sentence structure, and its mistakes would need measuring before it decided anything.
+1. **The MCP endpoint has no sign-in.** Over standard input and output the process belongs to one officer. Over HTTP the caller's identity must come from a verified access token, which is not built (ADR-0015).
+2. **The identity provider is simulated.** The server checks signed confirmations, but nothing here makes the officer approve the action at a real identity provider. That needs the council's identity team to issue tokens of this type, publish the public key and decide how the approval screen shows the call being approved.
+3. **The signing key has nowhere to live.** The card is signed with a key generated at run time. Production needs a managed key, a published public key and a plan for rotating it.
+4. **SQLite is one machine's file.** It survives a restart on one host. Several workers sharing cases need a shared store such as PostgreSQL.
+5. **Some abbreviations still split on purpose.** "St.", "Rd." and "Dr." end a sentence as often as they abbreviate, so the splitter splits after them. A measurement written just after one is lost and the case goes to an officer. That is the safe direction, but it costs an officer's time.
+6. **The criteria are invented.** A real authority's rules, and its view on what counts as an officer's decision, need sign-off from its planning and legal teams.
+7. **Model extraction is measured but not on the decision path.** ADR-0008 records how reliable small models were. Using extraction for decisions would need that measured again on real applications.
+8. **The one-number rule sends some clear cases to a person.** "At No. 14 the setback is 1.4 m" holds two numbers, so C1 is undetermined although the applicant was clear. That is the safe direction, chosen on purpose. Reading which number goes with which word needs a parser that understands sentence structure, and its mistakes would need measuring before it decided anything.
 
 ## Decision records
 
@@ -626,6 +640,7 @@ The reasoning behind each choice is recorded in `docs/adr/`.
 | 0014 | An officer's reply is checked against a fixed shape before it can decide a case |
 | 0015 | A real MCP client can reach the server through the official SDK |
 | 0016 | Each step can be traced, and a trace never holds case text |
+| 0017 | An officer's reply is signed for that officer, case and decision, and checked before it is recorded |
 
 The guides in `docs/guides/` go deeper: architecture, design questions, concepts and the runbook.
 Three of them teach one subject each from zero, with a running example and a glossary:

@@ -1,4 +1,4 @@
-.PHONY: install test lint demo gate mutate redteam compare llm all
+.PHONY: install test lint demo gate mutate redteam compare llm idp idp-check idp-down all
 
 install:
 	python -m venv .venv
@@ -28,5 +28,24 @@ compare:
 # Needs a live backend on :8001 (vLLM) or :11434 (Ollama).
 llm:
 	.venv/bin/python verify_llm.py
+
+# A real sign-in service: Keycloak in Docker, with one officer and one clerk
+# from hack/keycloak/council-realm.json. The passwords in that file are for
+# this laptop demo and nothing else.
+idp:
+	docker rm -f council-idp >/dev/null 2>&1 || true
+	docker run -d --name council-idp -p 127.0.0.1:8089:8080 \
+		-e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=demo-only-admin \
+		-v $(CURDIR)/hack/keycloak:/opt/keycloak/data/import:ro \
+		quay.io/keycloak/keycloak:26.8.2 start-dev --import-realm
+	@until curl -sf -o /dev/null http://localhost:8089/realms/council/.well-known/openid-configuration; \
+		do sleep 2; done; echo "Keycloak is up at http://localhost:8089"
+
+# One referred case decided by an officer who signed in at Keycloak. Needs `make idp`.
+idp-check:
+	.venv/bin/python verify_idp.py
+
+idp-down:
+	docker rm -f council-idp
 
 all: lint test gate mutate redteam compare

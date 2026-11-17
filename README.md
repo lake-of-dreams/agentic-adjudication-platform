@@ -361,9 +361,21 @@ same token again. Its id is already stored, so the server refuses with "already 
 agent had first sent it with case C2, that attempt would have failed on the fingerprint, and the
 token would still be unspent for C1. The id is stored only when every other check has passed.
 
-`issue_confirmation` in `adjudication/mcp_server/confirmation.py` plays the identity provider's
-part so the tests can make tokens. In a real deployment that private key lives with the identity
-provider and never on this server.
+Who signs the token? A council's sign-in service will not issue a token bound to one tool call.
+So a small **approval service** does, in `adjudication/identity/`. Officer off-7's own client
+signs in at the council's sign-in service and presents the result. The approval service checks it
+against the keys the sign-in service publishes, requires the `officer` role, and signs the
+confirmation. It publishes its own public key at a URL, and the permit server and the case graph
+read the key from there, so a changed key is picked up without anyone copying a file.
+
+`make idp` starts Keycloak, a widely used open-source sign-in service, with one officer and one
+clerk. `make idp-check` then decides a referred case through it: the clerk is refused, the officer's
+confirmation decides the case, and the same confirmation with the decision, the reason or the
+officer's name changed does not. The agent never holds what the officer signed in with. ADR-0019
+records the decision.
+
+In the tests, `issue_confirmation` in `adjudication/mcp_server/confirmation.py` signs directly with
+a test key, which stands in for the approval service.
 
 ### 5.6 Reaching the server from a real MCP client
 
@@ -508,11 +520,12 @@ on every push.
 
 ### 8.1 The tests
 
-There are 135 tests in six files.
+There are 160 tests in seven files.
 
 | File | Plain meaning | Tests |
 |---|---|---|
-| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses", the sentence splitter, the one-number rule, resuming once, and refusing a malformed, forged or misdirected officer reply | 62 |
+| `tests/test_invariants.py` | Properties that hold for every case, such as "never refuses", the sentence splitter, the one-number rule, resuming once, and refusing a malformed, forged or misdirected officer reply, or one whose reason was changed | 64 |
+| `tests/test_identity.py` | The sign-in check, published keys that rotate, and the approval service over HTTP | 23 |
 | `tests/test_grounding_and_scope.py` | Evidence, tool scope, the rule bugs and resuming from SQLite | 18 |
 | `tests/test_protocols.py` | The MCP server, the signed card and the model client | 19 |
 | `tests/test_confirmation.py` | The signed officer confirmation: each test sends a token wrong in exactly one way | 26 |
@@ -577,7 +590,8 @@ Everything except `verify_llm.py` runs on a laptop with no GPU, no network and n
 
 ```bash
 make install    # creates .venv and installs the package with its test tools
-make all        # lint, 135 tests, release gate, gate mutations, red team, topology comparison
+make all        # lint, 160 tests, release gate, gate mutations, red team, topology comparison
+make idp idp-check   # optional: decide a case through Keycloak in Docker (5.4)
 make demo       # four cases end to end, with the audit log reconstructed
 ```
 
@@ -610,7 +624,7 @@ because that is the question an appeal asks (Part 2).
 These need work or someone else's judgement before anything like this runs for real.
 
 1. **The MCP endpoint has no sign-in.** Over standard input and output the process belongs to one officer. Over HTTP the caller's identity must come from a verified access token, which is not built (ADR-0015).
-2. **The identity provider is simulated.** The server checks signed confirmations, but nothing here makes the officer approve the action at a real identity provider. That needs the council's identity team to issue tokens of this type, publish the public key and decide how the approval screen shows the call being approved.
+2. **The approval service has no screen.** Officers now sign in at a real sign-in service and an approval service signs for them (ADR-0019). It signs the call the officer's client sends. A page of its own that shows the officer the case, the decision and the reason before signing is not built, and it has been tried with Keycloak only.
 3. **The signing key has nowhere to live.** The card is signed with a key generated at run time. Production needs a managed key, a published public key and a plan for rotating it.
 4. **SQLite is one machine's file.** It survives a restart on one host. Several workers sharing cases need a shared store such as PostgreSQL.
 5. **Some abbreviations still split on purpose.** "St.", "Rd." and "Dr." end a sentence as often as they abbreviate, so the splitter splits after them. A measurement written just after one is lost and the case goes to an officer. That is the safe direction, but it costs an officer's time.
@@ -641,6 +655,8 @@ The reasoning behind each choice is recorded in `docs/adr/`.
 | 0015 | A real MCP client can reach the server through the official SDK |
 | 0016 | Each step can be traced, and a trace never holds case text |
 | 0017 | An officer's reply is signed for that officer, case and decision, and checked before it is recorded |
+| 0018 | The officer's stated reason is covered by the same signature |
+| 0019 | Officers sign in at a real sign-in service, and an approval service signs their confirmations |
 
 The guides in `docs/guides/` go deeper: architecture, design questions, concepts and the runbook.
 Three of them teach one subject each from zero, with a running example and a glossary:
@@ -662,6 +678,7 @@ Three of them teach one subject each from zero, with a running example and a glo
 | `ALL_CASES` | The explicit grant that lets a person touch every case | 5.3 |
 | Argument scope | The check that a tool is only given a case the person may touch | 5.2 |
 | Asymmetric automation | Automating only the decision whose mistakes can be undone | 1.2 |
+| Approval service | The program that checks an officer's sign-in and signs their confirmation of one call | 5.4 |
 | Audit log | The record of every step taken on a case | 2.3 |
 | Canonical form | One agreed way of writing a JSON object, so its bytes are always the same | 6.3 |
 | Checkpoint | Saved state that lets a paused case resume | 7.1 |
@@ -678,6 +695,9 @@ Three of them teach one subject each from zero, with a running example and a glo
 | Hash chaining | Linking log entries by fingerprints so any change is detectable | 2.3 |
 | HMAC | A signing method in which signer and checker share one secret | 6.2 |
 | Identity provider | The service that signs people in and vouches for who they are | 5.4 |
+| JWKS | JSON Web Key Set: the public keys a signer publishes at a URL so others can check its signatures | 5.4 |
+| Keycloak | An open-source sign-in service, used here for the live check | 5.4 |
+| OIDC | OpenID Connect: the standard most sign-in services use to say who signed in | 5.4 |
 | Input required | An MCP server's answer that asks the client for something and expects the same call again | 5.6 |
 | Interrupt | LangGraph's way of pausing a graph until outside input arrives | 7.1 |
 | JCS (RFC 8785) | The standard that defines the canonical form of JSON | 6.3 |

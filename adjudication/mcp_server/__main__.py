@@ -4,9 +4,10 @@
 
 An MCP client such as a desktop assistant starts this process itself, so the
 process belongs to one officer, named in the environment by whoever configured
-the client. ADJUDICATION_IDP_KEY may point at the identity provider's public
-key in PEM form. Without it no confirmation can be verified, so issue_permit
-always stops at the confirmation request: fail closed.
+the client. ADJUDICATION_APPROVAL_JWKS may hold the URL where the approval
+service publishes its keys (ADR-0019), or ADJUDICATION_IDP_KEY may point at one
+public key in PEM form. With neither, no confirmation can be verified, so
+issue_permit always stops at the confirmation request: fail closed.
 """
 from __future__ import annotations
 
@@ -18,6 +19,8 @@ import anyio
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from mcp.server.stdio import stdio_server
 
+from adjudication.identity.jwks import JwksKeys
+from adjudication.mcp_server.confirmation import KeySource
 from adjudication.mcp_server.server import (
     AdjudicationMCPServer,
     DelegationContext,
@@ -33,8 +36,10 @@ def main() -> int:
         print("ADJUDICATION_OFFICER is not set: refusing to serve tools for nobody", file=sys.stderr)
         return 2
     cases = frozenset(c.strip() for c in os.getenv("ADJUDICATION_CASES", "").split(",") if c.strip())
-    keys = {}
-    if path := os.getenv("ADJUDICATION_IDP_KEY"):
+    keys: KeySource = {}
+    if url := os.getenv("ADJUDICATION_APPROVAL_JWKS"):
+        keys = JwksKeys(url)
+    elif path := os.getenv("ADJUDICATION_IDP_KEY"):
         keys[os.getenv("ADJUDICATION_IDP_KID", "idp-1")] = load_pem_public_key(Path(path).read_bytes())
 
     core = AdjudicationMCPServer(default_registry(), confirmation_keys=keys)

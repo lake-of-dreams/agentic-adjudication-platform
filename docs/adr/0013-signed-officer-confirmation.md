@@ -54,9 +54,9 @@ it is asking the officer to approve.
   keeps it that way.
 
 ## Open questions
-* The identity provider is simulated by `issue_confirmation`. A real one must issue tokens of this
-  type, publish its public key and show the officer which call they are approving. That needs the
-  identity team.
+* The identity provider was simulated by `issue_confirmation`. ADR-0019 adds an approval service
+  that checks a real sign-in and signs the confirmation. Showing the officer the call on a screen
+  of its own is still open.
 * A stolen token can be used by anyone until it is spent or expires, inside five minutes and for
   one call only. Binding it to the client's key, as DPoP does for access tokens, would close that.
   It needs the client to hold a key, which this model does not have.

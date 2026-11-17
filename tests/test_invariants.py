@@ -334,6 +334,25 @@ def test_a_signed_request_for_information_cannot_be_turned_into_a_grant():
     _refused(graph, cfg, audit, "sig-decision", r, "different call")
 
 
+def test_an_officers_reason_cannot_be_changed_after_signing():
+    """ADR-0018. The reason is what an appeal reads. It was outside the signature."""
+    audit, graph, cfg = _paused("sig-reason")
+    good = reply("sig-reason", "REFUSE", rationale="height exceeds the limit")
+    _refused(graph, cfg, audit, "sig-reason",
+             {**good, "rationale": "applicant was rude"}, "different call")
+    _refused(graph, cfg, audit, "sig-reason",
+             {k: v for k, v in good.items() if k != "rationale"}, "different call")
+    out = graph.invoke(Command(resume=good), cfg)
+    assert out["decision"] == "REFUSE" and out["rationale"] == "height exceeds the limit"
+
+
+def test_a_reason_cannot_be_added_to_a_reply_signed_without_one():
+    audit, graph, cfg = _paused("sig-noreason")
+    bare = reply("sig-noreason", "GRANT")
+    _refused(graph, cfg, audit, "sig-noreason",
+             {**bare, "rationale": "the committee agreed"}, "different call")
+
+
 def test_a_decision_signed_for_one_case_cannot_decide_another():
     audit, graph, cfg = _paused("sig-case-b")
     _refused(graph, cfg, audit, "sig-case-b", reply("sig-case-a", "GRANT"), "different call")

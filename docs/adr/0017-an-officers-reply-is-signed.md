@@ -43,7 +43,6 @@ Anyone who could reach the resume call could freeze any waiting case that way.
   belongs in the schema given to `interrupt()`, never after it.
 
 ## Open questions
-* The identity provider is still simulated. A real one must issue tokens of this type and show the
-  officer the case and the decision being signed.
-* The rationale is not bound by the signature. Someone who intercepted a reply could change the
-  officer's stated reason but not the decision.
+* The identity provider was simulated. ADR-0019 replaces it with a real sign-in and an approval
+  service.
+* The rationale was not bound by the signature. ADR-0018 binds it.

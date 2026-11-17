@@ -25,7 +25,7 @@ import json
 import sqlite3
 import threading
 import uuid
-from typing import Any
+from typing import Any, Protocol
 
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -38,6 +38,14 @@ TOKEN_TYPE = "adjudication-confirmation+jwt"
 MAX_LIFETIME_S = 300
 # clocks on two machines disagree a little
 CLOCK_SKEW_S = 30
+
+
+class KeySource(Protocol):
+    """Where trusted public keys come from, by key id. A dict is one. So is
+    `adjudication.identity.jwks.JwksKeys`, which fetches them from the signer's
+    published key set and notices when a key is rotated."""
+
+    def get(self, kid: str, /) -> ec.EllipticCurvePublicKey | None: ...
 
 
 class ConfirmationRejected(Exception):
@@ -91,7 +99,7 @@ class UsedConfirmations:
         return True
 
 
-def verify_confirmation(token: str, *, trusted_keys: dict[str, ec.EllipticCurvePublicKey],
+def verify_confirmation(token: str, *, trusted_keys: KeySource,
                         audience: str, officer: str, tool: str, arguments: dict[str, Any],
                         now: float, used: UsedConfirmations | None) -> dict:
     """Returns the claims when the token confirms exactly this call, else raises.
@@ -113,7 +121,8 @@ def verify_confirmation(token: str, *, trusted_keys: dict[str, ec.EllipticCurveP
     # HMAC-with-the-public-key tokens get accepted elsewhere.
     if header.get("alg") != "ES256" or header.get("typ") != TOKEN_TYPE:
         raise ConfirmationRejected("wrong algorithm or token type")
-    key = trusted_keys.get(header.get("kid"))
+    kid = header.get("kid")
+    key = trusted_keys.get(kid) if isinstance(kid, str) else None
     if key is None:
         raise ConfirmationRejected("signed by a key this server does not trust")
     if not es256_verify(key, f"{protected}.{payload}".encode(), raw):

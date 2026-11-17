@@ -19,7 +19,6 @@ import sqlite3
 import time
 from collections.abc import Callable
 
-from cryptography.hazmat.primitives.asymmetric import ec
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -30,6 +29,7 @@ from adjudication.agents.officer import reply_model
 from adjudication.domain.clock import Clock
 from adjudication.domain.criteria import evaluate
 from adjudication.domain.model import RiskTier
+from adjudication.mcp_server.confirmation import KeySource
 from adjudication.retrieval.hybrid import Doc, HybridRetriever
 from adjudication.runtime import guardrails as g
 from adjudication.runtime.audit import AuditLog
@@ -51,12 +51,14 @@ def durable_checkpointer(path: str) -> SqliteSaver:
 
 def build_graph(corpus: list[Doc], audit: AuditLog, now: dt.datetime | None = None,
                 checkpointer: BaseCheckpointSaver | None = None, *,
-                officer_keys: dict[str, ec.EllipticCurvePublicKey] | None = None,
+                officer_keys: KeySource | None = None,
                 wall_clock: Callable[[], float] = time.time):
     """officer_keys are the identity provider keys that may sign an officer's
     decision, by key id. With none, no referred case can be resumed: fail closed."""
     retriever = HybridRetriever(corpus)
-    trusted = dict(officer_keys or {})
+    # Not copied: a key source that follows the signer's published keys has to
+    # stay the same object to see a rotation.
+    trusted = officer_keys if officer_keys is not None else {}
     NOW = now or dt.datetime.now(dt.UTC)
 
     def intake(state: CaseState) -> CaseState:

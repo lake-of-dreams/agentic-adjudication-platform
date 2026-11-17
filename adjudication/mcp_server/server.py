@@ -28,10 +28,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from cryptography.hazmat.primitives.asymmetric import ec
-
 from adjudication.mcp_server.confirmation import (
     ConfirmationRejected,
+    KeySource,
     UsedConfirmations,
     call_digest,
     verify_confirmation,
@@ -68,7 +67,7 @@ class AdjudicationMCPServer:
     registry: ToolRegistry
     # Identity provider keys that may sign confirmations, by key id. None
     # configured means no irreversible call can be confirmed: fail closed.
-    confirmation_keys: dict[str, ec.EllipticCurvePublicKey] = field(default_factory=dict)
+    confirmation_keys: KeySource = field(default_factory=dict)
     audience: str = "adjudication-mcp"
     # Spent confirmation ids. Pass a file path in production so they survive a restart.
     used_confirmations: UsedConfirmations = field(default_factory=UsedConfirmations)

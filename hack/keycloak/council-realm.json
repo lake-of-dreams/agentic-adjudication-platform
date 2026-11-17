@@ -1,0 +1,43 @@
+{
+  "realm": "council",
+  "enabled": true,
+  "accessTokenLifespan": 300,
+  "roles": {"realm": [{"name": "officer", "description": "May decide a referred case"}]},
+  "clients": [
+    {
+      "clientId": "officer-desk",
+      "name": "The officer's own client",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:8091/*"],
+      "protocolMappers": [
+        {
+          "name": "approval-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "adjudication-approval",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "off-014", "enabled": true, "emailVerified": true,
+      "firstName": "Priya", "lastName": "Nair", "email": "off-014@council.example",
+      "credentials": [{"type": "password", "value": "demo-only-officer", "temporary": false}],
+      "realmRoles": ["officer"]
+    },
+    {
+      "username": "clerk-3", "enabled": true, "emailVerified": true,
+      "firstName": "Sam", "lastName": "Okoye", "email": "clerk-3@council.example",
+      "credentials": [{"type": "password", "value": "demo-only-clerk", "temporary": false}],
+      "realmRoles": []
+    }
+  ]
+}

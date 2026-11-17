@@ -32,9 +32,10 @@ llm:
 # A real sign-in service: Keycloak in Docker, with one officer and one clerk
 # from hack/keycloak/council-realm.json. The passwords in that file are for
 # this laptop demo and nothing else.
+# Docker starts it again after a reboot, until `make idp-down`.
 idp:
 	docker rm -f council-idp >/dev/null 2>&1 || true
-	docker run -d --name council-idp -p 127.0.0.1:8089:8080 \
+	docker run -d --name council-idp --restart unless-stopped -p 127.0.0.1:8089:8080 \
 		-e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=demo-only-admin \
 		-v $(CURDIR)/hack/keycloak:/opt/keycloak/data/import:ro \
 		quay.io/keycloak/keycloak:26.8.2 start-dev --import-realm
